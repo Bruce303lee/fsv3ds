@@ -10,6 +10,9 @@
 #include "settings.h"
 #include "rpc.h"
 
+#include <sys/stat.h>
+#include "compat/scandir_compat.h"
+
 #define SCREEN_W 320
 #define SCREEN_H 240
 
@@ -44,10 +47,26 @@
 typedef enum {
 	UI_SCREEN_LOG,
 	UI_SCREEN_SETTINGS,
-	UI_SCREEN_INFO
+	UI_SCREEN_INFO,
+	UI_SCREEN_FOLDER_BROWSER
 } UiScreen;
 
 static UiScreen screen = UI_SCREEN_LOG;
+
+/* --- Folder browser state: independent of nav.c's tree navigation --
+ * this walks the raw filesystem from the SD card root via stat()/
+ * fsv3ds_scandir(), same low-level tools scanfs.c uses, so it works
+ * even before any scan has happened and can reach anywhere on the
+ * card, not just what's under the current scan root. */
+#define BROWSE_PATH_LEN     256
+#define BROWSE_NAME_LEN     48
+#define MAX_BROWSE_ENTRIES  64
+#define BROWSE_ROOT         "sdmc:/"
+
+static char browse_path[BROWSE_PATH_LEN] = BROWSE_ROOT;
+static char browse_entries[MAX_BROWSE_ENTRIES][BROWSE_NAME_LEN];
+static int browse_entry_count = 0;
+static int browse_page = 0;
 static C2D_TextBuf textBuf;
 static gboolean ptmu_ok = FALSE;
 
@@ -161,7 +180,8 @@ draw_rail( void )
 
 	for (i = 0; i < RAIL_ROWS; i++) {
 		float y = (float)(STATUS_BAR_H + i * RAIL_ROW_H);
-		gboolean active = (i == 1 && screen == UI_SCREEN_SETTINGS) ||
+		gboolean active = (i == 0 && screen == UI_SCREEN_FOLDER_BROWSER) ||
+		                  (i == 1 && screen == UI_SCREEN_SETTINGS) ||
 		                  (i == 2 && screen == UI_SCREEN_INFO) ||
 		                  (i == 3 && screen == UI_SCREEN_LOG);
 		float tw;
@@ -408,26 +428,221 @@ draw_info_screen( void )
 }
 
 
-/* --- Folder rail button: re-root + rescan at the selected directory --- */
+/* --- Folder browser: pick a base scan folder from the SD card root --- */
 
-static void
-action_load_folder( void )
+#define BROWSE_LIST_Y        (CONTENT_Y + 22)
+#define BROWSE_ROW_H         20
+#define BROWSE_VISIBLE_ROWS  ((CONTENT_H - 22) / BROWSE_ROW_H)
+
+/* Same "." / ".." filter as scanfs.c's de_select() -- kept as its own
+ * copy since that one's static to scanfs.c and this doesn't need the
+ * rest of scanfs.c's tree-building machinery, just a directory listing. */
+static int
+browse_de_select( const struct dirent *de )
 {
-	GNode *target = nav_selected_node( );
-	const char *path;
+	if (de->d_name[0] != '.')
+		return 1;
+	if (de->d_name[1] == '\0')
+		return 0;
+	if (de->d_name[1] != '.')
+		return 1;
+	if (de->d_name[2] == '\0')
+		return 0;
+	return 1;
+}
 
-	if (target == NULL || !NODE_IS_DIR(target))
-		target = nav_view_root( );
-	if (target == NULL)
+
+/* Re-lists browse_path's subdirectories (files excluded -- this is a
+ * folder picker, not a full file browser). Regular readdir() doesn't
+ * report reliable d_type on this platform, so each candidate gets a
+ * real stat() to confirm it's a directory, same as scanfs.c's own
+ * stat_node(). */
+static void
+refresh_browse_listing( void )
+{
+	struct dirent **dir_entries;
+	int num_entries, i;
+	size_t plen = strlen( browse_path );
+
+	browse_entry_count = 0;
+	browse_page = 0;
+
+	num_entries = fsv3ds_scandir( browse_path, &dir_entries, browse_de_select, fsv3ds_alphasort );
+	if (num_entries < 0)
 		return;
 
-	/* node_absname()'s buffer is evaluated (and copied out by
-	 * viz_scan_and_build -> scanfs's chdir()) before scanfs() tears
-	 * down the old tree `target` lives in -- see scanfs.c's ordering. */
-	path = node_absname( target );
-	rpc_logf( "ui: loading folder %s\n", path );
-	viz_scan_and_build( path );
+	for (i = 0; i < num_entries; i++) {
+		if (browse_entry_count < MAX_BROWSE_ENTRIES) {
+			char full[BROWSE_PATH_LEN];
+			struct stat st;
+
+			snprintf( full, sizeof(full), "%s%s%s", browse_path,
+				(plen > 0 && browse_path[plen - 1] == '/') ? "" : "/",
+				dir_entries[i]->d_name );
+
+			if (stat( full, &st ) == 0 && S_ISDIR(st.st_mode)) {
+				strncpy( browse_entries[browse_entry_count], dir_entries[i]->d_name, BROWSE_NAME_LEN - 1 );
+				browse_entries[browse_entry_count][BROWSE_NAME_LEN - 1] = '\0';
+				browse_entry_count++;
+			}
+		}
+		free( dir_entries[i] );
+	}
+	free( dir_entries );
+}
+
+
+static void
+browse_open( void )
+{
+	strcpy( browse_path, BROWSE_ROOT );
+	refresh_browse_listing( );
+	screen = UI_SCREEN_FOLDER_BROWSER;
+}
+
+
+static void
+browse_go_up( void )
+{
+	char *slash = strrchr( browse_path, '/' );
+
+	if (slash == NULL)
+		return;
+	/* "sdmc:/" itself -- keep the root slash rather than leaving a
+	 * bare "sdmc:" that nothing downstream expects. */
+	if (slash == browse_path + 5)
+		slash[1] = '\0';
+	else
+		slash[0] = '\0';
+	refresh_browse_listing( );
+}
+
+
+static void
+browse_descend( const char *name )
+{
+	size_t plen = strlen( browse_path );
+
+	if (plen + strlen( name ) + 2 >= sizeof(browse_path))
+		return; /* pathologically deep -- just refuse rather than truncate silently */
+
+	if (plen > 0 && browse_path[plen - 1] != '/')
+		strcat( browse_path, "/" );
+	strcat( browse_path, name );
+	refresh_browse_listing( );
+}
+
+
+static void
+action_use_browse_folder( void )
+{
+	rpc_logf( "ui: loading folder %s\n", browse_path );
+	viz_scan_and_build( browse_path );
 	screen = UI_SCREEN_LOG;
+}
+
+
+static void
+draw_folder_browser_screen( void )
+{
+	char pbuf[36];
+	float y;
+	gboolean has_up;
+	int visible, start, shown, i;
+
+	{
+		size_t len = strlen( browse_path );
+
+		if (len >= sizeof(pbuf)) {
+			pbuf[0] = pbuf[1] = pbuf[2] = '.';
+			strncpy( pbuf + 3, browse_path + (len - (sizeof(pbuf) - 4)), sizeof(pbuf) - 4 );
+			pbuf[sizeof(pbuf) - 1] = '\0';
+		}
+		else
+			strcpy( pbuf, browse_path );
+	}
+	draw_text( pbuf, (float)CONTENT_X, (float)CONTENT_Y, 0.36f, COLOR_TEXT );
+	draw_text( "Use this", (float)(CONTENT_X + CONTENT_W - 62), (float)CONTENT_Y, 0.36f, COLOR_YELLOW );
+
+	y = (float)BROWSE_LIST_Y;
+	has_up = (strcmp( browse_path, BROWSE_ROOT ) != 0);
+	if (has_up) {
+		draw_text( ".. (up)", (float)CONTENT_X, y, 0.38f, COLOR_TEXT_DIM );
+		y += BROWSE_ROW_H;
+	}
+
+	/* -1 unconditionally reserves a row for the "More" indicator below
+	 * -- without it, a full page of real entries (common: SD card roots
+	 * routinely have 10+ top-level folders) leaves "More" with nowhere
+	 * to draw but the footer's territory. Wastes one row of headroom
+	 * when there's nothing to page through, which is a fine trade. */
+	visible = BROWSE_VISIBLE_ROWS - (has_up ? 1 : 0) - 1;
+	if (visible < 1)
+		visible = 1;
+	start = browse_page * visible;
+	shown = browse_entry_count - start;
+	if (shown > visible) shown = visible;
+	if (shown < 0) shown = 0;
+
+	for (i = 0; i < shown; i++) {
+		draw_text( browse_entries[start + i], (float)CONTENT_X, y, 0.38f, COLOR_TEXT );
+		y += BROWSE_ROW_H;
+	}
+
+	if (browse_entry_count == 0)
+		draw_text( "(no subfolders)", (float)CONTENT_X, y, 0.36f, COLOR_TEXT_DIM );
+	else if (browse_entry_count > visible)
+		draw_text( "More >", (float)CONTENT_X, y, 0.34f, COLOR_TEXT_DIM );
+}
+
+
+static void
+handle_folder_browser_touch( int x, int y )
+{
+	int rel_y = y - CONTENT_Y;
+	gboolean has_up;
+	int list_row, visible, start, shown;
+
+	if (rel_y < 22) {
+		if (x >= CONTENT_X + CONTENT_W - 70)
+			action_use_browse_folder( );
+		return;
+	}
+
+	rel_y = y - BROWSE_LIST_Y;
+	if (rel_y < 0)
+		return;
+
+	has_up = (strcmp( browse_path, BROWSE_ROOT ) != 0);
+	list_row = rel_y / BROWSE_ROW_H;
+
+	if (has_up) {
+		if (list_row == 0) {
+			browse_go_up( );
+			return;
+		}
+		list_row--;
+	}
+
+	/* Must match draw_folder_browser_screen()'s reservation exactly, or
+	 * a tap on what looks like the "More" row would silently land on a
+	 * folder entry (or vice versa). */
+	visible = BROWSE_VISIBLE_ROWS - (has_up ? 1 : 0) - 1;
+	if (visible < 1)
+		visible = 1;
+	start = browse_page * visible;
+	shown = browse_entry_count - start;
+	if (shown > visible) shown = visible;
+	if (shown < 0) shown = 0;
+
+	if (list_row < shown) {
+		browse_descend( browse_entries[start + list_row] );
+	}
+	else if (list_row == shown && browse_entry_count > visible) {
+		browse_page++;
+		if (browse_page * visible >= browse_entry_count)
+			browse_page = 0; /* wrap back to the first page */
+	}
 }
 
 
@@ -444,10 +659,11 @@ ui_draw( C3D_RenderTarget *target )
 	draw_rail( );
 
 	switch (screen) {
-	case UI_SCREEN_SETTINGS: draw_settings_screen( ); break;
-	case UI_SCREEN_INFO:     draw_info_screen( );     break;
+	case UI_SCREEN_SETTINGS:        draw_settings_screen( );        break;
+	case UI_SCREEN_INFO:            draw_info_screen( );            break;
+	case UI_SCREEN_FOLDER_BROWSER:  draw_folder_browser_screen( );  break;
 	case UI_SCREEN_LOG:
-	default:                 draw_log_screen( );       break;
+	default:                        draw_log_screen( );             break;
 	}
 
 	draw_footer( );
@@ -469,7 +685,7 @@ ui_handle_touch( int x, int y )
 		int row = (y - STATUS_BAR_H) / RAIL_ROW_H;
 
 		switch (row) {
-		case 0: action_load_folder( ); break;
+		case 0: browse_open( ); break;
 		case 1: screen = UI_SCREEN_SETTINGS; break;
 		case 2: screen = UI_SCREEN_INFO; break;
 		case 3: screen = UI_SCREEN_LOG; break;
@@ -480,6 +696,8 @@ ui_handle_touch( int x, int y )
 
 	if (screen == UI_SCREEN_SETTINGS)
 		handle_settings_touch( x, y );
+	else if (screen == UI_SCREEN_FOLDER_BROWSER)
+		handle_folder_browser_touch( x, y );
 }
 
 /* end ui.c */

@@ -103,7 +103,13 @@ There is no local devkitARM toolchain in this environment. The loop is:
   buffer and draws into a `C3D_RenderTarget` that render.c creates and
   hands it once per frame (`ui_draw()`), same pattern as the top
   screen's stereo pair. `ui_handle_touch()` is the single entry point
-  main.c (and rpc.c's `TOUCH` command) funnel taps through.
+  main.c (and rpc.c's `TOUCH` command) funnel taps through. The Folder
+  screen is a real filesystem browser (`fsv3ds_scandir()` + `stat()`
+  directly on `sdmc:/`, same low-level calls scanfs.c uses) rather than
+  reusing nav.c's tree -- deliberately independent of scan state, so it
+  works before any scan and can reach folders the current scan root
+  never covered; "Use this" is the only point where it hands off to
+  `viz_scan_and_build()`.
 - `source/rpc.c` — dev-only remote control service, see above. Has a
   `MODE [MAPV|TREEV]` command for switching/querying the active
   visualization mode remotely — useful since there's no way to press
@@ -168,6 +174,16 @@ There is no local devkitARM toolchain in this environment. The loop is:
   General lesson: a "fill the frame" distance calc needs the
   axis-correct FOV (horizontal for width/depth, vertical for height),
   not the same FOV reused for both.
+- `ui.c`'s folder browser (the Folder screen) originally computed its
+  per-page entry capacity as `BROWSE_VISIBLE_ROWS - (has_up ? 1 : 0)`,
+  with no headroom reserved for the "More" pagination indicator itself.
+  At the SD card root (`has_up` false, real cards routinely have 10+
+  top-level folders) a full page of real entries left "More" with
+  nowhere to draw but the footer's row -- caught by RPC screenshot
+  before it reached the user. Fixed by reserving one row
+  unconditionally (`... - 1`); draw and touch-hit-test must compute
+  `visible` identically or a tap that looks like it's on "More" can
+  silently land on a folder entry instead.
 - Not a bug in this app's code, but worth knowing: the 3DS's sdmc FAT
   driver returns `st_mtime == 0` for files/directories that plainly
   aren't from 1970 (first surfaced by ui.c's Info screen, the first

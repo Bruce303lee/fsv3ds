@@ -29,12 +29,15 @@ the circle pad, in stereoscopic 3D, on real 3DS hardware.
   label every visible node instead of just the selection (Settings)
 - **Touch-driven bottom screen** (`source/ui.c`) — an iOS-ish status bar
   (battery/wifi), a left button rail (Folder / Settings / Info / Log), and
-  a footer breadcrumb. Folder re-roots and rescans at whichever directory
-  is currently selected in the 3D view; Settings offers a color scheme
-  preset picker (Default / High-Contrast / Monochrome) and the label-mode
-  toggle above, both persisted to `sdmc:/3ds/fsv3ds/settings.cfg`; Info
-  shows details for the selected node; Log shows the same scrollback the
-  RPC `LOG` command streams.
+  a footer breadcrumb. Folder opens a real folder browser starting at the
+  SD card root (independent of whatever's currently scanned -- reads the
+  filesystem directly, so it works before any scan too), with paging and
+  a ".." row; "Use this" rescans starting at whatever folder you land on.
+  Settings offers a color scheme preset picker (Default / High-Contrast /
+  Monochrome) and a label-mode toggle (Selected only / All / Off), both
+  persisted to `sdmc:/3ds/fsv3ds/settings.cfg`; Info shows details for the
+  selected node; Log shows the same scrollback the RPC `LOG` command
+  streams.
 - **A dev-only remote control service** — see [`RPC.md`](RPC.md). Not
   something the app needs to run; a debugging aid so scans, screenshots,
   button presses, and touch taps can be driven over the network during
@@ -85,10 +88,9 @@ the same navigation state (`source/nav.c`) and dispatched through
 `source/viz.c`. The bottom screen is a touch-driven UI (`source/ui.c`,
 `source/settings.c`) rather than upstream's GTK dialogs/dirtree widget.
 Not yet ported: TreeV's folder-tab decoration and inter-platform
-branch/loop connectors (upstream-only cosmetic details), full custom
-per-category color picking (color schemes are presets, not arbitrary
-RGB), and an in-app folder browser beyond "re-root at whatever's
-currently selected in the 3D view."
+branch/loop connectors (upstream-only cosmetic details), and full
+custom per-category color picking (color schemes are presets, not
+arbitrary RGB).
 
 ## Why does this exist / how was it built
 

@@ -1,10 +1,10 @@
 /* settings.h - fsv3ds Phase 6
  *
  * User-facing settings exposed on the bottom-screen Settings panel
- * (ui.c): which color scheme is active (color.c) and whether node
- * labels are drawn for the selected node only or for every visible
- * node (render.c's draw_labels()). Persisted to the SD card so they
- * survive relaunch -- see settings.c for the file format/location.
+ * (ui.c): which color scheme is active (color.c) and whether/which
+ * node labels are drawn (render.c's draw_labels()). Persisted to the
+ * SD card so they survive relaunch -- see settings.c for the file
+ * format/location.
  *
  * This module is the seam between ui.c (presentation) and the modules
  * that actually apply a setting (color.c, render.c): setters here do
@@ -18,6 +18,9 @@
 typedef enum {
 	LABEL_MODE_SELECTED_ONLY,
 	LABEL_MODE_ALL,
+	LABEL_MODE_OFF, /* appended, not inserted -- see settings.c's file
+	                 * format comment for why the numeric values of
+	                 * existing entries can't move */
 	NUM_LABEL_MODES
 } LabelMode;
 

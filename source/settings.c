@@ -12,8 +12,12 @@
 
 static LabelMode label_mode = LABEL_MODE_SELECTED_ONLY;
 
+/* settings.cfg stores label_mode as a plain integer (the LabelMode
+ * enum value) -- LABEL_MODE_OFF was appended after SELECTED_ONLY/ALL
+ * were already shipping on hardware rather than inserted before them,
+ * so an existing saved "0"/"1" keeps meaning what it always meant. */
 static const char *label_mode_names[NUM_LABEL_MODES] = {
-	"Selected only", "All"
+	"Selected only", "All", "Off"
 };
 
 

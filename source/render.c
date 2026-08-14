@@ -318,6 +318,10 @@ draw_labels( C3D_RenderTarget *target )
 	C3D_Mtx vp;
 	C3D_FVec eye;
 	unsigned int i;
+	LabelMode label_mode = settings_get_label_mode( );
+
+	if (label_mode == LABEL_MODE_OFF)
+		return; /* nothing to draw -- skip the citro2d pass entirely */
 
 	if (viz_get_mode( ) == VIZ_MAPV) {
 		labels = mapv_label_data( );
@@ -346,7 +350,7 @@ draw_labels( C3D_RenderTarget *target )
 		 * screenshots that motivated this). Settings screen (ui.c) can
 		 * opt into LABEL_MODE_ALL anyway; that caveat is surfaced there,
 		 * not enforced here. */
-		if (!labels[i].is_selected && settings_get_label_mode( ) != LABEL_MODE_ALL)
+		if (!labels[i].is_selected && label_mode != LABEL_MODE_ALL)
 			continue;
 
 		world = FVec4_New( labels[i].x, labels[i].y, labels[i].z, 1.0f );
