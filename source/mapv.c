@@ -32,6 +32,7 @@
 #include "scanfs.h"
 #include "rpc.h"
 #include "color.h"
+#include "nav.h"
 
 #include <stdlib.h>
 #include <3ds.h> /* linearAlloc/linearFree -- GPU vertex buffers must live
@@ -310,9 +311,21 @@ static MapVLabel *labels = NULL;
 static unsigned int label_count = 0;
 
 /* Phase 3 navigation state -- see mapv.h. Declared up here since
- * emit_boxes_recursive() (below) needs selected_node for highlighting. */
+ * emit_boxes_recursive() (below) needs selected_node for highlighting.
+ * Phase 5: these are now just a read-through cache of nav.c's shared
+ * identity (see nav.h), refreshed via sync_nav_cache() at the top of
+ * every entry point below -- TreeV can mutate the same underlying
+ * state (e.g. drilling while in TreeV mode, then switching back to
+ * MapV), so this file can no longer assume it's the sole writer. */
 static GNode *view_root = NULL;
 static GNode *selected_node = NULL;
+
+static void
+sync_nav_cache( void )
+{
+	view_root = nav_view_root( );
+	selected_node = nav_selected_node( );
+}
 
 #define VERTS_PER_BOX 30 /* 4 side quads + 1 top quad, 6 verts/quad */
 
@@ -700,6 +713,8 @@ mapv_build_scene( void )
 {
 	mapv_init( );
 
+	sync_nav_cache( );
+
 	/* Defense in depth against the class of bug fixed above (a caller
 	 * that scans without calling mapv_reset_navigation() first leaves
 	 * view_root dangling into freed memory, not NULL -- this can't
@@ -707,8 +722,8 @@ mapv_build_scene( void )
 	 * lands on turning out not to be a directory, which is what that
 	 * bug actually looked like in practice). */
 	if (view_root == NULL || !NODE_IS_DIR(view_root)) {
-		view_root = root_dnode;
-		selected_node = root_dnode->children;
+		nav_reset( );
+		sync_nav_cache( );
 	}
 
 	/* Start at view_root's children, not view_root itself: they're
@@ -726,14 +741,17 @@ mapv_build_scene( void )
 void
 mapv_reset_navigation( void )
 {
-	view_root = root_dnode;
-	selected_node = root_dnode->children;
+	nav_reset( );
+	sync_nav_cache( );
 
 	/* Piggybacked here (rather than called separately by every scan
 	 * path) so it can't be forgotten by one of them the way the
 	 * navigation reset itself once was -- see mapv_scan_and_build()'s
 	 * comment. Assigns the whole tree, not just what's currently
-	 * drawn, so colors are already there if you drill somewhere new. */
+	 * drawn, so colors are already there if you drill somewhere new.
+	 * Mode-agnostic despite the name (kept for source compat with
+	 * main.c/rpc.c, which call this before building whichever mode is
+	 * currently active -- see viz.c). */
 	color_assign_recursive( globals.fstree );
 }
 
@@ -769,38 +787,28 @@ mapv_scan_and_build( const char *root )
 GNode *
 mapv_view_root( void )
 {
-	return view_root;
+	return nav_view_root( );
 }
 
 
 GNode *
 mapv_selected_node( void )
 {
-	return selected_node;
+	return nav_selected_node( );
 }
 
 
 void
 mapv_cycle_selection( int dir )
 {
+	sync_nav_cache( );
 	if (selected_node == NULL || view_root == NULL)
 		return;
 	if (view_root->children == NULL || view_root->children->next == NULL)
 		return; /* 0 or 1 children: nothing to cycle to */
 
-	if (dir > 0) {
-		selected_node = (selected_node->next != NULL) ? selected_node->next : view_root->children;
-	}
-	else if (dir < 0) {
-		if (selected_node == view_root->children) {
-			GNode *last = view_root->children;
-			while (last->next != NULL)
-				last = last->next;
-			selected_node = last;
-		}
-		else
-			selected_node = selected_node->prev;
-	}
+	nav_cycle_selection( dir );
+	sync_nav_cache( );
 
 	rebuild_vbuf( ); /* re-bake highlight colors -- see rebuild_vbuf() comment */
 	set_camera_focus_goal( selected_node, TRUE ); /* zoom-out/pan/zoom-in -- see mapv_camera_tick() */
@@ -823,6 +831,7 @@ mapv_move_selection_row( int dir )
 	GNode *node, *best = NULL;
 	double x0, y0, best_dy = 0.0, best_dx = 0.0;
 
+	sync_nav_cache( );
 	if (selected_node == NULL || view_root == NULL)
 		return;
 
@@ -854,7 +863,8 @@ mapv_move_selection_row( int dir )
 	if (best == NULL)
 		return; /* already in the nearest/farthest row -- no wraparound */
 
-	selected_node = best;
+	nav_set_selected( best );
+	sync_nav_cache( );
 	rebuild_vbuf( );
 	set_camera_focus_goal( selected_node, TRUE );
 }
@@ -863,13 +873,9 @@ mapv_move_selection_row( int dir )
 boolean
 mapv_drill_selected( void )
 {
-	if (selected_node == NULL)
-		return FALSE;
-	if (!NODE_IS_DIR(selected_node) || selected_node->children == NULL)
+	if (!nav_drill_selected( ))
 		return FALSE;
 
-	view_root = selected_node;
-	selected_node = view_root->children;
 	mapv_build_scene( );
 
 	return TRUE;
@@ -879,14 +885,9 @@ mapv_drill_selected( void )
 boolean
 mapv_go_up( void )
 {
-	GNode *came_from;
-
-	if (view_root == NULL || view_root == root_dnode)
+	if (!nav_go_up( ))
 		return FALSE;
 
-	came_from = view_root;
-	view_root = view_root->parent;
-	selected_node = came_from;
 	mapv_build_scene( );
 
 	return TRUE;

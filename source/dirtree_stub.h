@@ -5,11 +5,11 @@
  * consults it (dirtree_entry_expanded()) to decide how deep to draw.
  * There's no tree-widget UI (that's still unported -- navigation
  * happens by drilling the camera into one directory at a time instead,
- * see mapv_drill_selected()/mapv_go_up()), so this stubs the query:
- * exactly mapv_view_root() is "expanded", every other directory is
- * collapsed. That bounds MapV's draw pass to one level of the tree
- * (view root's direct children) regardless of how much is on the card,
- * no matter how deep view_root itself currently sits. */
+ * see nav.h), so this stubs the query: exactly nav_view_root() is
+ * "expanded", every other directory is collapsed. That bounds each
+ * mode's draw pass to one level of the tree (view root's direct
+ * children) regardless of how much is on the card, no matter how deep
+ * view_root itself currently sits. Shared by both MapV and TreeV. */
 #ifndef FSV3DS_DIRTREE_STUB_H
 #define FSV3DS_DIRTREE_STUB_H
 

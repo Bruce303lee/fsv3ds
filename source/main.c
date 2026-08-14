@@ -1,15 +1,17 @@
-/* main.c - fsv3ds Phase 3 entry point
+/* main.c - fsv3ds Phase 5 entry point
  *
  * Bottom screen: text console (scan progress/tree dump/status).
- * Top screen: citro3d MapV render of the scanned tree.
+ * Top screen: citro3d render of the scanned tree, in whichever of
+ * MapV/TreeV is currently active (see viz.h).
  *
  * Controls:
  *   Circle Pad   orbit camera (theta/phi)
  *   L / R (held) zoom out / in
- *   D-pad L/R    cycle selection within the current treemap row
- *   D-pad U/D    jump selection to the nearest block in the row above/below
+ *   D-pad L/R    cycle selection within the current view
+ *   D-pad U/D    jump selection to the nearest block in the row above/below (MapV only -- see viz.h)
  *   A            drill into the selected directory
  *   B            go back up to the parent
+ *   X            toggle MapV / TreeV
  *   Y            screenshot -> sdmc:/fsv3ds_screenshot.ppm
  *   SELECT       rescan sdmc:/3ds from the top
  *   START        exit
@@ -20,11 +22,11 @@
 #include <string.h>
 
 #include "common.h"
-#include "scanfs.h"
-#include "mapv.h"
 #include "render.h"
 #include "rpc.h"
 #include "color.h"
+#include "viz.h"
+#include "nav.h"
 
 #define SCAN_ROOT "sdmc:/3ds"
 
@@ -74,8 +76,8 @@ static void print_breadcrumb( void );
 static void
 print_status( void )
 {
-	GNode *vr = mapv_view_root( );
-	GNode *sel = mapv_selected_node( );
+	GNode *vr = nav_view_root( );
+	GNode *sel = nav_selected_node( );
 
 	print_breadcrumb( );
 
@@ -102,8 +104,8 @@ print_status( void )
 static void
 print_breadcrumb( void )
 {
-	GNode *vr = mapv_view_root( );
-	GNode *sel = mapv_selected_node( );
+	GNode *vr = nav_view_root( );
+	GNode *sel = nav_selected_node( );
 	char path_buf[256];
 	char *segment;
 	int first = 1;
@@ -158,8 +160,8 @@ main( int argc, char **argv )
 	color_init( );
 	rpc_init( ); /* dev-only remote control -- see rpc.h */
 
-	printf( "fsv3ds -- Phase 3 (navigation)\n" );
-	printf( "SELECT scan, A drill in, B up, Y shot, START exit\n\n" );
+	printf( "fsv3ds -- Phase 5 (TreeV)\n" );
+	printf( "SELECT scan, A drill in, B up, X mode, Y shot, START exit\n\n" );
 	print_breadcrumb( );
 
 	while (aptMainLoop( )) {
@@ -176,34 +178,34 @@ main( int argc, char **argv )
 			break;
 
 		if (kDown & KEY_SELECT) {
-			GNode **node_table;
-			unsigned int node_count;
-
 			consoleClear( );
 			printf( "fsv3ds -- scanning " SCAN_ROOT " ...\n\n" );
 
-			node_table = scanfs( SCAN_ROOT, &node_count );
-			free( node_table ); /* nothing uses it until touch/click picking exists */
+			/* Goes through viz.c (scanfs() + shared nav reset + rebuild
+			 * whichever mode is active) rather than scanfs()+mapv_* directly
+			 * -- see mapv_scan_and_build()'s old comment for the class of
+			 * bug that separating scan from nav-reset caused once. */
+			viz_scan_and_build( SCAN_ROOT );
 
 			printf( "\n--- tree (first 3 levels) ---\n" );
 			print_tree( root_dnode, 0, 3 );
-			printf( "\nbuilding MapV scene...\n" );
-
-			/* MUST happen before mapv_build_scene() -- see its comment
-			 * in mapv.h. This is exactly the call the bug was missing. */
-			mapv_reset_navigation( );
-			mapv_build_scene( );
 			print_status( );
 		}
 
 		if (kDown & KEY_A) {
-			if (mapv_drill_selected( ))
+			if (viz_drill_selected( ))
 				print_status( );
 		}
 
 		if (kDown & KEY_B) {
-			if (mapv_go_up( ))
+			if (viz_go_up( ))
 				print_status( );
+		}
+
+		if (kDown & KEY_X) {
+			viz_toggle_mode( );
+			rpc_logf( "mode: %s\n", viz_get_mode( ) == VIZ_MAPV ? "MapV" : "TreeV" );
+			print_status( );
 		}
 
 		/* Swapped from the "natural" RIGHT=+1/LEFT=-1 mapping: sibling
@@ -212,21 +214,22 @@ main( int argc, char **argv )
 		 * felt backwards on hardware. This matches what it should feel
 		 * like, not what the underlying list order says. */
 		if (kDown & KEY_DRIGHT) {
-			mapv_cycle_selection( -1 );
+			viz_cycle_selection( -1 );
 			print_status( );
 		}
 		if (kDown & KEY_DLEFT) {
-			mapv_cycle_selection( 1 );
+			viz_cycle_selection( 1 );
 			print_status( );
 		}
 		/* Untested direction sense (same caveat as the L/R swap above)
-		 * -- if up/down jump to the wrong row, swap these two signs. */
+		 * -- if up/down jump to the wrong row, swap these two signs.
+		 * MapV only -- see viz_move_selection_row()'s comment. */
 		if (kDown & KEY_DUP) {
-			mapv_move_selection_row( 1 );
+			viz_move_selection_row( 1 );
 			print_status( );
 		}
 		if (kDown & KEY_DDOWN) {
-			mapv_move_selection_row( -1 );
+			viz_move_selection_row( -1 );
 			print_status( );
 		}
 
@@ -251,11 +254,11 @@ main( int argc, char **argv )
 			zoom = 0.98f;
 
 		if (dtheta != 0.0f || dphi != 0.0f || zoom != 1.0f)
-			mapv_camera_orbit( dtheta, dphi, zoom );
+			viz_camera_orbit( dtheta, dphi, zoom );
 
 		/* Unconditional, every frame: eases the camera toward whatever
 		 * was last selected -- see mapv_camera_tick()'s comment. */
-		mapv_camera_tick( );
+		viz_camera_tick( );
 
 		/* C3D_FrameBegin(C3D_FRAME_SYNCDRAW) inside render_frame() paces
 		 * this loop to vblank; no separate gfxFlushBuffers/SwapBuffers/

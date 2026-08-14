@@ -14,6 +14,8 @@
 
 #include "rpc.h"
 #include "mapv.h"
+#include "treev.h"
+#include "viz.h"
 #include "render.h"
 
 #define SOC_ALIGN      0x1000
@@ -186,12 +188,33 @@ handle_command( int csock, char *line )
 	}
 	else if (!strcmp( line, "SCAN" )) {
 		char reply[128];
+		unsigned int nverts;
 		int len;
 
-		mapv_scan_and_build( SCAN_ROOT );
+		viz_scan_and_build( SCAN_ROOT );
 		render_frame( ); /* so an immediate SHOT reflects the new scene */
 
-		len = snprintf( reply, sizeof(reply), "OK vertices=%u\n", mapv_vertex_count( ) );
+		nverts = (viz_get_mode( ) == VIZ_MAPV) ? mapv_vertex_count( ) : treev_vertex_count( );
+		len = snprintf( reply, sizeof(reply), "OK vertices=%u\n", nverts );
+		send( csock, reply, len, 0 );
+	}
+	else if (!strcmp( line, "MODE" )) {
+		char reply[64];
+		int len;
+
+		if (args != NULL) {
+			if (!strcmp( args, "MAPV" ))
+				viz_set_mode( VIZ_MAPV );
+			else if (!strcmp( args, "TREEV" ))
+				viz_set_mode( VIZ_TREEV );
+			else {
+				send( csock, "ERR unknown mode\n", 18, 0 );
+				return;
+			}
+			render_frame( ); /* so an immediate SHOT reflects the new scene */
+		}
+
+		len = snprintf( reply, sizeof(reply), "OK mode=%s\n", viz_get_mode( ) == VIZ_MAPV ? "MAPV" : "TREEV" );
 		send( csock, reply, len, 0 );
 	}
 	else if (!strcmp( line, "SHOT" )) {

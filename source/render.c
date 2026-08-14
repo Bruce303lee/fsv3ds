@@ -25,6 +25,8 @@
 
 #include "render.h"
 #include "mapv.h"
+#include "treev.h"
+#include "viz.h"
 #include "vshader_shbin.h"
 
 #define CLEAR_COLOR 0x181820FF
@@ -79,25 +81,73 @@ render_init( void )
 }
 
 
-/* Shared by both projection variants below. */
-static void
-compute_eye_target_fov( C3D_FVec *eye, C3D_FVec *target, float *fovy_rad )
+/* Everything the projection/draw functions below need out of whichever
+ * mode's camera state is currently active -- computed once per call
+ * via compute_eye_info() so compute_view_projection()/draw_scene()/
+ * draw_labels() don't each need their own MapV-vs-TreeV branch. */
+typedef struct {
+	C3D_FVec eye, target;
+	float fovy_rad;
+	float near_clip, far_clip, distance, base_distance;
+} EyeInfo;
+
+/* Upstream ogl.c's setup_projection_matrix(): dx = near*tan(0.5*fovX),
+ * dy = dx/aspect -- i.e. camera->fov is a *horizontal* FOV. citro3d's
+ * Persp variants want vertical FOV, so convert. Shared by both modes. */
+static float
+horiz_to_vert_fov( float fovx_deg )
 {
-	const MapVCameraState *cam = mapv_camera( );
-	float theta_rad = cam->theta * (RENDER_PI / 180.0f);
-	float phi_rad = cam->phi * (RENDER_PI / 180.0f);
-	float fovx_rad = cam->fov * (RENDER_PI / 180.0f);
+	float fovx_rad = fovx_deg * (RENDER_PI / 180.0f);
 
-	*eye = FVec3_New(
-		cam->target_x + cam->distance * cosf( theta_rad ) * cosf( phi_rad ),
-		cam->target_y + cam->distance * sinf( theta_rad ) * cosf( phi_rad ),
-		cam->target_z + cam->distance * sinf( phi_rad ) );
-	*target = FVec3_New( cam->target_x, cam->target_y, cam->target_z );
+	return 2.0f * atanf( tanf( 0.5f * fovx_rad ) / C3D_AspectRatioTop );
+}
 
-	/* Upstream ogl.c's setup_projection_matrix(): dx = near*tan(0.5*fovX),
-	 * dy = dx/aspect -- i.e. camera->fov is a *horizontal* FOV. citro3d's
-	 * Persp variants want vertical FOV, so convert. */
-	*fovy_rad = 2.0f * atanf( tanf( 0.5f * fovx_rad ) / C3D_AspectRatioTop );
+
+static void
+compute_eye_info( EyeInfo *info )
+{
+	if (viz_get_mode( ) == VIZ_MAPV) {
+		const MapVCameraState *cam = mapv_camera( );
+		float theta_rad = cam->theta * (RENDER_PI / 180.0f);
+		float phi_rad = cam->phi * (RENDER_PI / 180.0f);
+
+		info->eye = FVec3_New(
+			cam->target_x + cam->distance * cosf( theta_rad ) * cosf( phi_rad ),
+			cam->target_y + cam->distance * sinf( theta_rad ) * cosf( phi_rad ),
+			cam->target_z + cam->distance * sinf( phi_rad ) );
+		info->target = FVec3_New( cam->target_x, cam->target_y, cam->target_z );
+		info->fovy_rad = horiz_to_vert_fov( cam->fov );
+		info->near_clip = cam->near_clip;
+		info->far_clip = cam->far_clip;
+		info->distance = cam->distance;
+		info->base_distance = cam->base_distance;
+	}
+	else {
+		/* Mirrors camera.c's treev_get_camera_position(): target is
+		 * converted from native RTZ to Cartesian, and the camera's
+		 * absolute heading is target.theta + orbit_theta - 180 (i.e.
+		 * relative to whichever angle you're currently looking at, not
+		 * a fixed world-absolute direction -- see treev.h's comment on
+		 * TreeVCameraState). */
+		const TreeVCameraState *cam = treev_camera( );
+		float target_theta_rad = cam->target_theta * (RENDER_PI / 180.0f);
+		float target_x = cam->target_r * cosf( target_theta_rad );
+		float target_y = cam->target_r * sinf( target_theta_rad );
+		float target_z = cam->target_z;
+		float heading_rad = (cam->target_theta + cam->orbit_theta - 180.0f) * (RENDER_PI / 180.0f);
+		float phi_rad = cam->phi * (RENDER_PI / 180.0f);
+
+		info->eye = FVec3_New(
+			target_x + cam->distance * cosf( heading_rad ) * cosf( phi_rad ),
+			target_y + cam->distance * sinf( heading_rad ) * cosf( phi_rad ),
+			target_z + cam->distance * sinf( phi_rad ) );
+		info->target = FVec3_New( target_x, target_y, target_z );
+		info->fovy_rad = horiz_to_vert_fov( cam->fov );
+		info->near_clip = cam->near_clip;
+		info->far_clip = cam->far_clip;
+		info->distance = cam->distance;
+		info->base_distance = cam->base_distance;
+	}
 }
 
 
@@ -111,18 +161,17 @@ compute_eye_target_fov( C3D_FVec *eye, C3D_FVec *target, float *fovy_rad )
 static void
 compute_view_projection( C3D_Mtx *out, float iod )
 {
-	const MapVCameraState *cam = mapv_camera( );
+	EyeInfo info;
 	C3D_Mtx projection, view;
-	C3D_FVec eye, target, up;
-	float fovy_rad;
+	C3D_FVec up;
 
-	compute_eye_target_fov( &eye, &target, &fovy_rad );
+	compute_eye_info( &info );
 
-	Mtx_PerspStereoTilt( &projection, fovy_rad, C3D_AspectRatioTop,
-		cam->near_clip, cam->far_clip, iod, cam->distance, false );
+	Mtx_PerspStereoTilt( &projection, info.fovy_rad, C3D_AspectRatioTop,
+		info.near_clip, info.far_clip, iod, info.distance, false );
 
 	up = FVec3_New( 0.0f, 0.0f, 1.0f ); /* world is +Z-up */
-	Mtx_LookAt( &view, eye, target, up, false );
+	Mtx_LookAt( &view, info.eye, info.target, up, false );
 
 	Mtx_Multiply( out, &projection, &view );
 }
@@ -139,20 +188,19 @@ compute_view_projection( C3D_Mtx *out, float iod )
 static void
 compute_view_projection_notilt( C3D_Mtx *out, float iod, C3D_FVec *out_eye )
 {
-	const MapVCameraState *cam = mapv_camera( );
+	EyeInfo info;
 	C3D_Mtx projection, view;
-	C3D_FVec eye, target, up;
-	float fovy_rad;
+	C3D_FVec up;
 
-	compute_eye_target_fov( &eye, &target, &fovy_rad );
+	compute_eye_info( &info );
 	if (out_eye != NULL)
-		*out_eye = eye;
+		*out_eye = info.eye;
 
-	Mtx_PerspStereo( &projection, fovy_rad, C3D_AspectRatioTop,
-		cam->near_clip, cam->far_clip, iod, cam->distance, false );
+	Mtx_PerspStereo( &projection, info.fovy_rad, C3D_AspectRatioTop,
+		info.near_clip, info.far_clip, iod, info.distance, false );
 
 	up = FVec3_New( 0.0f, 0.0f, 1.0f );
-	Mtx_LookAt( &view, eye, target, up, false );
+	Mtx_LookAt( &view, info.eye, info.target, up, false );
 
 	Mtx_Multiply( out, &projection, &view );
 }
@@ -161,12 +209,24 @@ compute_view_projection_notilt( C3D_Mtx *out, float iod, C3D_FVec *out_eye )
 static void
 draw_scene( C3D_RenderTarget *target, float iod )
 {
-	const MapVVertex *verts = mapv_vertex_data( );
-	unsigned int nverts = mapv_vertex_count( );
+	/* MapVVertex/TreeVVertex are identically shaped (x,y,z,r,g,b,a
+	 * floats -- see treev.h) so BufInfo_Add below doesn't care which
+	 * mode's accessor filled this pointer; only the source differs. */
+	const MapVVertex *verts;
+	unsigned int nverts;
 	C3D_Mtx viewProjection;
 	C3D_AttrInfo *attrInfo;
 	C3D_TexEnv *env;
 	C3D_BufInfo *bufInfo;
+
+	if (viz_get_mode( ) == VIZ_MAPV) {
+		verts = mapv_vertex_data( );
+		nverts = mapv_vertex_count( );
+	}
+	else {
+		verts = (const MapVVertex *)treev_vertex_data( );
+		nverts = treev_vertex_count( );
+	}
 
 	C3D_RenderTargetClear( target, C3D_CLEAR_ALL, CLEAR_COLOR, 0 );
 	C3D_FrameDrawOn( target );
@@ -241,13 +301,26 @@ draw_scene( C3D_RenderTarget *target, float iod )
 static void
 draw_labels( C3D_RenderTarget *target )
 {
-	const MapVLabel *labels = mapv_label_data( );
-	unsigned int n = mapv_label_count( );
-	const MapVCameraState *cam = mapv_camera( );
+	/* MapVLabel/TreeVLabel are identically shaped (x,y,z,name,is_selected
+	 * -- see treev.h) so the loop below doesn't care which mode's
+	 * accessor filled this pointer. */
+	const MapVLabel *labels;
+	unsigned int n;
+	EyeInfo info;
 	C3D_Mtx vp;
 	C3D_FVec eye;
 	unsigned int i;
 
+	if (viz_get_mode( ) == VIZ_MAPV) {
+		labels = mapv_label_data( );
+		n = mapv_label_count( );
+	}
+	else {
+		labels = (const MapVLabel *)treev_label_data( );
+		n = treev_label_count( );
+	}
+
+	compute_eye_info( &info );
 	compute_view_projection_notilt( &vp, 0.0f, &eye );
 
 	C2D_SceneBegin( target );
@@ -285,7 +358,7 @@ draw_labels( C3D_RenderTarget *target )
 		 * grow/shrink as you zoom -- a ratio against cam->distance
 		 * wouldn't, since that ratio stays ~constant through a zoom. */
 		dist = FVec3_Distance( eye, FVec3_New( world.x, world.y, world.z ) );
-		scale = CLAMP( LABEL_BASE_SCALE * (cam->base_distance / dist), LABEL_MIN_SCALE, LABEL_MAX_SCALE );
+		scale = CLAMP( LABEL_BASE_SCALE * (info.base_distance / dist), LABEL_MIN_SCALE, LABEL_MAX_SCALE );
 
 		C2D_TextParse( &text, textBuf, labels[i].name );
 		C2D_TextOptimize( &text );
@@ -324,14 +397,16 @@ void
 render_frame( void )
 {
 	float slider, iod;
+	EyeInfo info;
 
 	slider = osGet3DSliderState( );
+	compute_eye_info( &info );
 	/* Scaled to our world units (tens of thousands, driven by scanned
 	 * byte sizes) rather than the small fixed constant devkitPro's
 	 * examples use for their meters-ish scenes -- proportion, not
 	 * magnitude, is what should carry over. 0.03 read as too subtle on
 	 * hardware; doubled. */
-	iod = slider * mapv_camera( )->distance * 0.06f;
+	iod = slider * info.distance * 0.06f;
 
 	/* Always cycle Begin/End, even with nothing to draw yet (before the
 	 * first scan) -- C3D_FRAME_SYNCDRAW is what paces the main loop to
