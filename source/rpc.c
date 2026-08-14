@@ -30,6 +30,10 @@ static int listen_sock = -1;
 
 static u32 injected_keys = 0;
 
+static gboolean touch_injected = FALSE;
+static int injected_touch_x = 0;
+static int injected_touch_y = 0;
+
 static char log_buf[LOG_BUF_SIZE];
 static size_t log_len = 0;
 
@@ -111,6 +115,27 @@ rpc_take_injected_keys( void )
 	u32 k = injected_keys;
 	injected_keys = 0;
 	return k;
+}
+
+
+gboolean
+rpc_take_injected_touch( int *x, int *y )
+{
+	if (!touch_injected)
+		return FALSE;
+
+	touch_injected = FALSE;
+	*x = injected_touch_x;
+	*y = injected_touch_y;
+	return TRUE;
+}
+
+
+const char *
+rpc_log_buffer( size_t *out_len )
+{
+	*out_len = log_len;
+	return log_buf;
 }
 
 
@@ -218,15 +243,30 @@ handle_command( int csock, char *line )
 		send( csock, reply, len, 0 );
 	}
 	else if (!strcmp( line, "SHOT" )) {
-		static unsigned char rgb[400 * 240 * 3];
-		char header[32];
-		int hlen;
+		/* Optional arg selects which screen: TOP (default, back-compat
+		 * with clients that predate the bottom-screen UI) or BOTTOM. */
+		if (args != NULL && !strcmp( args, "BOTTOM" )) {
+			static unsigned char rgb[320 * 240 * 3];
+			char header[32];
+			int hlen;
 
-		render_capture_rgb( rgb );
-		hlen = snprintf( header, sizeof(header), "PPM %d\n", 15 + (int)sizeof(rgb) );
-		send( csock, header, hlen, 0 );
-		send( csock, "P6\n400 240\n255\n", 15, 0 );
-		send( csock, rgb, sizeof(rgb), 0 );
+			render_capture_rgb_bottom( rgb );
+			hlen = snprintf( header, sizeof(header), "PPM %d\n", 15 + (int)sizeof(rgb) );
+			send( csock, header, hlen, 0 );
+			send( csock, "P6\n320 240\n255\n", 15, 0 );
+			send( csock, rgb, sizeof(rgb), 0 );
+		}
+		else {
+			static unsigned char rgb[400 * 240 * 3];
+			char header[32];
+			int hlen;
+
+			render_capture_rgb( rgb );
+			hlen = snprintf( header, sizeof(header), "PPM %d\n", 15 + (int)sizeof(rgb) );
+			send( csock, header, hlen, 0 );
+			send( csock, "P6\n400 240\n255\n", 15, 0 );
+			send( csock, rgb, sizeof(rgb), 0 );
+		}
 	}
 	else if (!strcmp( line, "LOG" )) {
 		char header[32];
@@ -246,6 +286,18 @@ handle_command( int csock, char *line )
 		}
 		else
 			send( csock, "ERR unknown key\n", 16, 0 );
+	}
+	else if (!strcmp( line, "TOUCH" ) && args != NULL) {
+		int x, y;
+
+		if (sscanf( args, "%d %d", &x, &y ) == 2) {
+			injected_touch_x = x;
+			injected_touch_y = y;
+			touch_injected = TRUE;
+			send( csock, "OK\n", 3, 0 );
+		}
+		else
+			send( csock, "ERR usage: TOUCH x y\n", 22, 0 );
 	}
 	else {
 		send( csock, "ERR unknown command\n", 21, 0 );

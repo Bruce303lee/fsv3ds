@@ -27,6 +27,8 @@
 #include "mapv.h"
 #include "treev.h"
 #include "viz.h"
+#include "settings.h"
+#include "ui.h"
 #include "vshader_shbin.h"
 
 #define CLEAR_COLOR 0x181820FF
@@ -45,6 +47,7 @@ static shaderProgram_s program;
 static int uLoc_viewProjection;
 static C3D_RenderTarget *targetLeft;
 static C3D_RenderTarget *targetRight;
+static C3D_RenderTarget *targetBottom;
 static C2D_TextBuf textBuf;
 
 
@@ -64,6 +67,11 @@ render_init( void )
 	targetRight = C3D_RenderTargetCreate( 240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8 );
 	C3D_RenderTargetSetOutput( targetLeft, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS );
 	C3D_RenderTargetSetOutput( targetRight, GFX_TOP, GFX_RIGHT, DISPLAY_TRANSFER_FLAGS );
+
+	/* Bottom screen: no stereo, no 3D pass -- ui.c's touch UI is
+	 * citro2d-only, drawn straight into this target from render_frame(). */
+	targetBottom = C3D_RenderTargetCreate( 240, 320, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8 );
+	C3D_RenderTargetSetOutput( targetBottom, GFX_BOTTOM, GFX_LEFT, DISPLAY_TRANSFER_FLAGS );
 
 	vshader_dvlb = DVLB_ParseFile( (u32 *)vshader_shbin, vshader_shbin_size );
 	shaderProgramInit( &program );
@@ -332,11 +340,13 @@ draw_labels( C3D_RenderTarget *target )
 		float sx, sy, dist, scale;
 		C2D_Text text;
 
-		/* Only the selected node gets a label now -- with ~40 boxes on
-		 * screen and no overlap avoidance, labeling all of them was an
-		 * unreadable pile of overlapping text (see the two screenshots
-		 * that motivated this). */
-		if (!labels[i].is_selected)
+		/* Only the selected node gets a label by default -- with ~40
+		 * boxes on screen and no overlap avoidance, labeling all of
+		 * them was an unreadable pile of overlapping text (see the two
+		 * screenshots that motivated this). Settings screen (ui.c) can
+		 * opt into LABEL_MODE_ALL anyway; that caveat is surfaced there,
+		 * not enforced here. */
+		if (!labels[i].is_selected && settings_get_label_mode( ) != LABEL_MODE_ALL)
 			continue;
 
 		world = FVec4_New( labels[i].x, labels[i].y, labels[i].z, 1.0f );
@@ -424,6 +434,10 @@ render_frame( void )
 		draw_labels( targetRight );
 	}
 
+	C3D_RenderTargetClear( targetBottom, C3D_CLEAR_ALL, CLEAR_COLOR, 0 );
+	C3D_FrameDrawOn( targetBottom );
+	ui_draw( targetBottom );
+
 	C3D_FrameEnd( 0 );
 }
 
@@ -462,6 +476,33 @@ render_capture_rgb( unsigned char *out )
 			unsigned char *dst = &out[(y * 400 + x) * 3];
 
 			/* memory order is B,G,R (see GSP_BGR8_OES note above) */
+			dst[0] = fb[srcOff + 2];
+			dst[1] = fb[srcOff + 1];
+			dst[2] = fb[srcOff + 0];
+		}
+	}
+}
+
+
+/* Same un-rotation as render_capture_rgb(), but for the bottom screen
+ * (320x240, always mono -- see render_capture_rgb()'s comment for the
+ * physical-rotation/byte-order background). */
+void
+render_capture_rgb_bottom( unsigned char *out )
+{
+	u16 stride, fb_h;
+	u8 *fb;
+	int x, y;
+
+	fb = gfxGetFramebuffer( GFX_BOTTOM, GFX_LEFT, &stride, &fb_h );
+	if (fb == NULL)
+		return;
+
+	for (y = 0; y < 240; y++) {
+		for (x = 0; x < 320; x++) {
+			u32 srcOff = (u32)(stride * x + (stride - 1 - y)) * 3;
+			unsigned char *dst = &out[(y * 320 + x) * 3];
+
 			dst[0] = fb[srcOff + 2];
 			dst[1] = fb[srcOff + 1];
 			dst[2] = fb[srcOff + 0];

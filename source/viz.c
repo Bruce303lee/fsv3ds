@@ -73,6 +73,19 @@ viz_scan_and_build( const char *root )
 
 
 void
+viz_rebuild( void )
+{
+	if (nav_view_root( ) == NULL)
+		return;
+
+	if (mode == VIZ_MAPV)
+		mapv_build_scene( );
+	else
+		treev_build_scene( );
+}
+
+
+void
 viz_cycle_selection( int dir )
 {
 	if (mode == VIZ_MAPV)

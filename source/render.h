@@ -21,4 +21,8 @@ void render_screenshot( const char *path );
  * rpc.c to stream a screenshot straight over the network. */
 void render_capture_rgb( unsigned char *out_400x240x3 );
 
+/* Same idea for the bottom screen (ui.c's touch UI) -- 320x240, always
+ * mono (no stereo on the bottom screen). */
+void render_capture_rgb_bottom( unsigned char *out_320x240x3 );
+
 #endif /* FSV3DS_RENDER_H */

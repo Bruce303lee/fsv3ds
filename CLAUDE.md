@@ -17,7 +17,15 @@ There is no local devkitARM toolchain in this environment. The loop is:
      export PATH=\$DEVKITARM/bin:\$DEVKITPRO/tools/bin:\$PATH; cd ~/fsv3ds && make 2>&1"
    ```
    Sync the working tree there first (`rsync -az --delete`), then `scp`
-   the resulting `fsv3ds.3dsx` back.
+   the resulting `fsv3ds.3dsx` back. Password auth needs
+   `sshpass -p ubuntu`; if `ssh`/`rsync`/`scp` hang indefinitely right
+   after "Trying private key: ~/.ssh/id_rsa" (visible with `-v`) instead
+   of ever offering password auth, this environment's ssh-agent has keys
+   loaded that the remote box doesn't recognize and openssh stalls
+   negotiating them before it'll fall back to password -- add
+   `-o PreferredAuthentications=password -o PubkeyAuthentication=no` to
+   force straight to password auth and skip the stall. (Also add
+   `-o StrictHostKeyChecking=no` since it's a throwaway build VM.)
 2. **Deploy over FTP** to the 3DS. The console can only run one homebrew
    app at a time, so the user has to manually switch it to an FTP server
    app before a new build can be pushed, then switch back to launch
@@ -51,17 +59,58 @@ There is no local devkitARM toolchain in this environment. The loop is:
 - `source/scanfs.c` — SD-card scanner, close to a 1:1 port of upstream's
   `scanfs.c`.
 - `source/mapv.c` — the MapV (treemap) layout engine (ported from
-  upstream `geometry.c`) plus Phase 3 navigation state (view root,
-  selection, camera animation state machine) that upstream has no
-  equivalent for (that logic lived in GTK event handlers there).
+  upstream `geometry.c`) plus the camera-animation state machine that
+  upstream has no equivalent for (that logic lived in GTK event
+  handlers there).
+- `source/treev.c` — the TreeV (cylindrical) layout engine, mirroring
+  `mapv.c`'s structure and one-level-at-a-time design. See its header
+  comment for why TreeV's ancestor-relative radius/angle math needed
+  `dirtree_stub.c`'s rule widened (below) where MapV never did.
+- `source/nav.c` — navigation identity (view root, selection) shared
+  between MapV and TreeV, extracted out of mapv.c so drilling/
+  selecting in one mode doesn't leave the other mode's state stale
+  across a mode switch.
+- `source/viz.c` — mode dispatcher (`VizMode`: `VIZ_MAPV`/`VIZ_TREEV`).
+  main.c and rpc.c call through here (`viz_cycle_selection()` etc.)
+  instead of calling `mapv_*`/`treev_*` directly, so a button press or
+  RPC command doesn't need to know which mode is active. render.c
+  still branches on `viz_get_mode()` itself (see `EyeInfo` in
+  render.c) since C has no polymorphism for the differently-typed
+  vertex/camera/label accessors.
 - `source/render.c` — citro3d rendering from scratch. Upstream's
   `ogl.c` is OpenGL; there is no OpenGL on 3DS, only the low-level
   PICA200 GPU API via citro3d.
 - `source/dirtree_stub.c` — stubs upstream's GTK directory-tree widget
   query (`dirtree_entry_expanded()`) down to "is this the current view
-  root" — there's no tree-widget UI, navigation happens by moving the
-  camera between one fully-drawn directory level at a time instead.
-- `source/rpc.c` — dev-only remote control service, see above.
+  root, or one of its ancestors" — there's no tree-widget UI,
+  navigation happens by moving the camera between one fully-drawn
+  directory level at a time instead. The ancestor-chain part (not just
+  view_root itself) exists for TreeV (see treev.c's header comment);
+  verified as a behavioral no-op for MapV, which only ever asks this
+  about view_root's *children*.
+- `source/color.c` — real per-extension file coloring via `fnmatch()`.
+  Colors are looked up through a `ColorScheme`-indexed table
+  (`color_set_scheme()`/`color_get_scheme()`) rather than one fixed
+  palette, so settings.c's scheme picker can swap the whole palette
+  without touching the pattern-matching logic.
+- `source/settings.c` — user-facing settings (color scheme, label mode)
+  persisted to `sdmc:/3ds/fsv3ds/settings.cfg`. The seam between ui.c
+  (presentation) and the modules that actually apply a setting: its
+  setters re-run `color_assign_recursive()` + `viz_rebuild()` themselves
+  so ui.c doesn't need to know that mechanic.
+- `source/ui.c` — the touch-driven bottom screen (status bar, button
+  rail, content screens, footer breadcrumb). Owns its own C2D text
+  buffer and draws into a `C3D_RenderTarget` that render.c creates and
+  hands it once per frame (`ui_draw()`), same pattern as the top
+  screen's stereo pair. `ui_handle_touch()` is the single entry point
+  main.c (and rpc.c's `TOUCH` command) funnel taps through.
+- `source/rpc.c` — dev-only remote control service, see above. Has a
+  `MODE [MAPV|TREEV]` command for switching/querying the active
+  visualization mode remotely — useful since there's no way to press
+  the physical X button over RPC — and a `TOUCH x y` command so ui.c's
+  touch UI stays RPC-testable the same way button input already was;
+  `SHOT` takes an optional `BOTTOM` arg to capture the bottom screen
+  instead of the top.
 
 ## Gotchas worth knowing before touching render.c
 
@@ -109,6 +158,23 @@ There is no local devkitARM toolchain in this environment. The loop is:
   old tree). RPC's `SCAN` command used the correct wrapper, so RPC
   testing never caught this — a reminder that RPC-path parity with
   physical-input paths matters, not just RPC coverage existing.
+- TreeV's camera framing was sizing "how far back does the camera need
+  to be to fit this tall spike" off the *horizontal* FOV. The 3DS top
+  screen is landscape (400x240), so the actual vertical FOV is
+  narrower than the horizontal one — using the wrong one underframes
+  height specifically, which didn't show up in MapV (fixed, small
+  box heights) but clipped TreeV's size-driven spikes (and their
+  labels) off the top of frame. See `treev.c`'s `half_tan_vfov()`.
+  General lesson: a "fill the frame" distance calc needs the
+  axis-correct FOV (horizontal for width/depth, vertical for height),
+  not the same FOV reused for both.
+- Not a bug in this app's code, but worth knowing: the 3DS's sdmc FAT
+  driver returns `st_mtime == 0` for files/directories that plainly
+  aren't from 1970 (first surfaced by ui.c's Info screen, the first
+  place any of `NodeDesc`'s atime/mtime/ctime fields were ever
+  displayed). `ui.c`'s `format_time()` shows "unknown" rather than the
+  literal epoch date for `t == 0` -- if atime/ctime ever get surfaced
+  somewhere too, they'll need the same guard.
 
 ## When adding new navigation/camera features
 

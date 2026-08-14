@@ -34,6 +34,12 @@ void viz_toggle_mode( void );
  * mapv_scan_and_build(). */
 void viz_scan_and_build( const char *root );
 
+/* Rebuilds whichever mode is currently active in place, without
+ * rescanning or touching nav state -- for settings.c after a color
+ * scheme change re-runs color_assign_recursive() and needs the baked
+ * per-vertex colors regenerated. No-op before the first scan. */
+void viz_rebuild( void );
+
 /* Dispatches to the active mode's mapv_/treev_ equivalents. */
 void viz_cycle_selection( int dir );
 

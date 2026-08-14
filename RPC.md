@@ -41,8 +41,10 @@ Text-reply commands respond with a single line and close:
 | Command | Reply | What it does |
 |---|---|---|
 | `PING` | `PONG` | Liveness check |
-| `SCAN` | `OK vertices=<n>` | Runs `mapv_scan_and_build("sdmc:/3ds")`, then renders one frame so a subsequent `SHOT` reflects it immediately |
+| `SCAN` | `OK vertices=<n>` | Runs `viz_scan_and_build("sdmc:/3ds")`, then renders one frame so a subsequent `SHOT` reflects it immediately |
+| `MODE [MAPV\|TREEV]` | `OK mode=<MAPV\|TREEV>` | With an arg, switches the active visualization mode (there's no way to press the physical X button over RPC); with no arg, just reports the current mode |
 | `KEY <NAME>` | `OK` or `ERR unknown key` | Injects a synthetic button press, merged into `hidKeysDown()` for exactly one frame. Names: `A B X Y L R START SELECT UP DOWN LEFT RIGHT` |
+| `TOUCH <x> <y>` | `OK` or `ERR usage: TOUCH x y` | Injects a synthetic tap at bottom-screen pixel coordinates (0-319, 0-239), consumed by `ui_handle_touch()` on the next frame -- the only way to drive the touch UI (Folder/Settings/Info/Log rail, settings toggles) without physically tapping the console. One tap per command, no drag/gesture support. |
 
 Binary-reply commands send a one-line header, then exactly that many raw
 bytes, then close:
@@ -50,7 +52,8 @@ bytes, then close:
 | Command | Header | Payload |
 |---|---|---|
 | `SHOT` | `PPM <size>\n` | A complete binary PPM (P6) file — 400x240 top-screen capture, un-rotated and color-corrected, ready to save straight to disk |
-| `LOG` | `LOG <size>\n` | The contents of the in-memory log ring buffer (4KB, fills once and stops — restart the app to clear it) |
+| `SHOT BOTTOM` | `PPM <size>\n` | Same, but a 320x240 capture of the bottom screen (the touch UI) instead -- always mono, no stereo there |
+| `LOG` | `LOG <size>\n` | The contents of the in-memory log ring buffer (4KB, fills once and stops — restart the app to clear it). The same content is shown live on the bottom screen's Log panel. |
 
 Unrecognized commands get back `ERR unknown command`.
 
@@ -79,9 +82,11 @@ is a minimal reference client:
 ```bash
 python3 rpc_client.py PING
 python3 rpc_client.py SCAN
-python3 rpc_client.py SHOT      # writes rpc_shot.ppm in the cwd
+python3 rpc_client.py SHOT              # writes rpc_shot.ppm in the cwd
+python3 rpc_client.py SHOT BOTTOM       # writes rpc_shot_bottom.ppm instead
 python3 rpc_client.py LOG
-python3 rpc_client.py KEY A     # simulate pressing A next frame
+python3 rpc_client.py KEY A             # simulate pressing A next frame
+python3 rpc_client.py TOUCH 36 94       # simulate tapping bottom-screen (36,94)
 ```
 
 Or talk to it directly with netcat for one-off text commands:
