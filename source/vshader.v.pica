@@ -1,0 +1,30 @@
+; vshader.v.pica - fsv3ds Phase 2
+; Minimal passthrough shader: transform baked world-space position by a
+; single combined view-projection matrix, pass vertex color straight
+; through. No lighting -- box faces are pre-shaded per-vertex on the CPU
+; (mapv.c bakes a darker shade for side faces vs. top faces).
+
+.fvec viewProjection[4]
+
+.constf myconst(0.0, 1.0, -1.0, 0.1)
+.alias  ones myconst.yyyy
+
+.out outpos position
+.out outclr color
+
+.alias inpos v0
+.alias inclr v1
+
+.proc main
+	mov r0.xyz, inpos
+	mov r0.w,   ones
+
+	dp4 outpos.x, viewProjection[0], r0
+	dp4 outpos.y, viewProjection[1], r0
+	dp4 outpos.z, viewProjection[2], r0
+	dp4 outpos.w, viewProjection[3], r0
+
+	mov outclr, inclr
+
+	end
+.end
