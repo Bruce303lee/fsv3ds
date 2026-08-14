@@ -17,13 +17,13 @@
 #include "treev.h"
 #include "viz.h"
 #include "render.h"
+#include "ui.h"
+#include "settings.h"
 
 #define SOC_ALIGN      0x1000
 #define SOC_BUFFERSIZE 0x100000
 #define RPC_PORT       5151
 #define LOG_BUF_SIZE   4096
-
-#define SCAN_ROOT "sdmc:/3ds" /* keep in sync with main.c */
 
 static u32 *soc_buffer = NULL;
 static int listen_sock = -1;
@@ -216,8 +216,8 @@ handle_command( int csock, char *line )
 		unsigned int nverts;
 		int len;
 
-		viz_scan_and_build( SCAN_ROOT );
-		render_frame( ); /* so an immediate SHOT reflects the new scene */
+		ui_scan_with_feedback( settings_get_default_root( ) ); /* same overlay/nav-reset path as physical SELECT */
+		render_frame( ); /* so an immediate SHOT reflects the final (post-scan) scene */
 
 		nverts = (viz_get_mode( ) == VIZ_MAPV) ? mapv_vertex_count( ) : treev_vertex_count( );
 		len = snprintf( reply, sizeof(reply), "OK vertices=%u\n", nverts );

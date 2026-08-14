@@ -10,7 +10,11 @@
 #define SETTINGS_DIR  "sdmc:/3ds/fsv3ds"
 #define SETTINGS_PATH SETTINGS_DIR "/settings.cfg"
 
+#define DEFAULT_ROOT_LEN     256
+#define DEFAULT_ROOT_FALLBACK "sdmc:/3ds"
+
 static LabelMode label_mode = LABEL_MODE_SELECTED_ONLY;
+static char default_root[DEFAULT_ROOT_LEN] = DEFAULT_ROOT_FALLBACK;
 
 /* settings.cfg stores label_mode as a plain integer (the LabelMode
  * enum value) -- LABEL_MODE_OFF was appended after SELECTED_ONLY/ALL
@@ -40,6 +44,7 @@ save_to_disk( void )
 
 	fprintf( f, "color_scheme=%d\n", color_get_scheme( ) );
 	fprintf( f, "label_mode=%d\n", (int)label_mode );
+	fprintf( f, "default_root=%s\n", default_root );
 	fclose( f );
 }
 
@@ -48,7 +53,7 @@ void
 settings_init( void )
 {
 	FILE *f;
-	char line[64];
+	char line[DEFAULT_ROOT_LEN + 32]; /* long enough for "default_root=" + a full path */
 	int loaded_scheme = COLOR_SCHEME_DEFAULT;
 	LabelMode loaded_label_mode = LABEL_MODE_SELECTED_ONLY;
 
@@ -56,11 +61,23 @@ settings_init( void )
 	if (f != NULL) {
 		while (fgets( line, sizeof(line), f ) != NULL) {
 			int val;
+			static const char root_prefix[] = "default_root=";
 
 			if (sscanf( line, "color_scheme=%d", &val ) == 1)
 				loaded_scheme = val;
 			else if (sscanf( line, "label_mode=%d", &val ) == 1)
 				loaded_label_mode = (LabelMode)val;
+			else if (!strncmp( line, root_prefix, sizeof(root_prefix) - 1 )) {
+				char *p = line + sizeof(root_prefix) - 1;
+				size_t len = strlen( p );
+
+				while (len > 0 && (p[len - 1] == '\n' || p[len - 1] == '\r'))
+					p[--len] = '\0';
+				if (len > 0) {
+					strncpy( default_root, p, sizeof(default_root) - 1 );
+					default_root[sizeof(default_root) - 1] = '\0';
+				}
+			}
 		}
 		fclose( f );
 		rpc_logf( "settings: loaded from " SETTINGS_PATH "\n" );
@@ -144,6 +161,25 @@ settings_label_mode_name( LabelMode mode )
 	if (mode < 0 || mode >= NUM_LABEL_MODES)
 		return "?";
 	return label_mode_names[mode];
+}
+
+
+const char *
+settings_get_default_root( void )
+{
+	return default_root;
+}
+
+
+void
+settings_set_default_root( const char *path )
+{
+	if (path == NULL || path[0] == '\0')
+		return;
+
+	strncpy( default_root, path, sizeof(default_root) - 1 );
+	default_root[sizeof(default_root) - 1] = '\0';
+	save_to_disk( );
 }
 
 /* end settings.c */

@@ -108,8 +108,12 @@ There is no local devkitARM toolchain in this environment. The loop is:
   directly on `sdmc:/`, same low-level calls scanfs.c uses) rather than
   reusing nav.c's tree -- deliberately independent of scan state, so it
   works before any scan and can reach folders the current scan root
-  never covered; "Use this" is the only point where it hands off to
-  `viz_scan_and_build()`.
+  never covered; "Use this" saves the chosen path as settings.c's
+  `default_root` and hands off to `ui_scan_with_feedback()`, the shared
+  helper (also used by main.c's SELECT handler and rpc.c's `SCAN`) that
+  shows a one-frame "Scanning..." overlay before the blocking scanfs()
+  walk -- added after the folder browser made it trivial to point a
+  scan at something big enough to freeze the app with no feedback.
 - `source/rpc.c` — dev-only remote control service, see above. Has a
   `MODE [MAPV|TREEV]` command for switching/querying the active
   visualization mode remotely — useful since there's no way to press

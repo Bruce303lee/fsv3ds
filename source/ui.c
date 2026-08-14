@@ -9,6 +9,7 @@
 #include "color.h"
 #include "settings.h"
 #include "rpc.h"
+#include "render.h"
 
 #include <sys/stat.h>
 #include "compat/scandir_compat.h"
@@ -67,6 +68,15 @@ static char browse_path[BROWSE_PATH_LEN] = BROWSE_ROOT;
 static char browse_entries[MAX_BROWSE_ENTRIES][BROWSE_NAME_LEN];
 static int browse_entry_count = 0;
 static int browse_page = 0;
+
+/* Set for exactly one extra render_frame() call before a blocking
+ * scanfs() walk (see ui_scan_with_feedback()) -- without this, a big
+ * scan (easy to trigger now that the folder browser can point at
+ * anything on the card, not just the small sdmc:/3ds default) just
+ * freezes the app with no feedback until it's done. */
+static gboolean scanning = FALSE;
+static char scanning_path[BROWSE_PATH_LEN];
+
 static C2D_TextBuf textBuf;
 static gboolean ptmu_ok = FALSE;
 
@@ -316,15 +326,35 @@ draw_settings_screen( void )
 	draw_text( "Color scheme:", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_TEXT_DIM );
 	snprintf( buf, sizeof(buf), "%s  (tap to change)", color_scheme_name( settings_get_color_scheme( ) ) );
 	draw_text( buf, (float)CONTENT_X, y + 18.0f, UI_TEXT_SCALE, COLOR_TEXT );
-
 	y += SETTINGS_ROW_H;
+
 	draw_text( "Node labels:", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_TEXT_DIM );
 	snprintf( buf, sizeof(buf), "%s  (tap to change)", settings_label_mode_name( settings_get_label_mode( ) ) );
 	draw_text( buf, (float)CONTENT_X, y + 18.0f, UI_TEXT_SCALE, COLOR_TEXT );
+	y += SETTINGS_ROW_H;
 
-	if (settings_get_label_mode( ) == LABEL_MODE_ALL) {
-		y += SETTINGS_ROW_H;
+	if (settings_get_label_mode( ) == LABEL_MODE_ALL)
 		draw_text( "(may overlap with many nodes on screen)", (float)CONTENT_X, y, 0.35f, COLOR_TEXT_DIM );
+	y += SETTINGS_ROW_H;
+
+	/* Informational only -- not tap-to-cycle like the two above (a
+	 * folder path isn't something you cycle through). Set via the
+	 * Folder screen's "Use this", not from here. */
+	draw_text( "Default folder:", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_TEXT_DIM );
+	{
+		const char *root = settings_get_default_root( );
+		char pbuf[40];
+		size_t len = strlen( root );
+
+		if (len >= sizeof(pbuf)) {
+			pbuf[0] = pbuf[1] = pbuf[2] = '.';
+			strncpy( pbuf + 3, root + (len - (sizeof(pbuf) - 4)), sizeof(pbuf) - 4 );
+			pbuf[sizeof(pbuf) - 1] = '\0';
+		}
+		else
+			strcpy( pbuf, root );
+
+		draw_text( pbuf, (float)CONTENT_X, y + 18.0f, 0.4f, COLOR_TEXT );
 	}
 }
 
@@ -536,9 +566,8 @@ browse_descend( const char *name )
 static void
 action_use_browse_folder( void )
 {
-	rpc_logf( "ui: loading folder %s\n", browse_path );
-	viz_scan_and_build( browse_path );
-	screen = UI_SCREEN_LOG;
+	settings_set_default_root( browse_path );
+	ui_scan_with_feedback( browse_path );
 }
 
 
@@ -646,6 +675,46 @@ handle_folder_browser_touch( int x, int y )
 }
 
 
+static void
+draw_scanning_overlay( void )
+{
+	char pbuf[36];
+	size_t len = strlen( scanning_path );
+
+	if (len >= sizeof(pbuf)) {
+		pbuf[0] = pbuf[1] = pbuf[2] = '.';
+		strncpy( pbuf + 3, scanning_path + (len - (sizeof(pbuf) - 4)), sizeof(pbuf) - 4 );
+		pbuf[sizeof(pbuf) - 1] = '\0';
+	}
+	else
+		strcpy( pbuf, scanning_path );
+
+	draw_text( "Scanning...", (float)CONTENT_X, (float)CONTENT_Y, UI_TEXT_SCALE, COLOR_TEXT );
+	draw_text( pbuf, (float)CONTENT_X, (float)(CONTENT_Y + 20.0f), 0.36f, COLOR_TEXT_DIM );
+}
+
+
+/* Shows a one-frame "Scanning..." overlay, then runs the blocking
+ * scanfs() walk (via viz_scan_and_build()) that would otherwise freeze
+ * the app with no feedback until it's done. Shared by main.c's SELECT
+ * handler, the Folder screen's "Use this", and rpc.c's SCAN command,
+ * so all three ways to trigger a scan behave identically. */
+void
+ui_scan_with_feedback( const char *path )
+{
+	strncpy( scanning_path, path, sizeof(scanning_path) - 1 );
+	scanning_path[sizeof(scanning_path) - 1] = '\0';
+
+	scanning = TRUE;
+	render_frame( ); /* presents the overlay before the blocking call below */
+	scanning = FALSE;
+
+	rpc_logf( "scanning %s ...\n", path );
+	viz_scan_and_build( path );
+	screen = UI_SCREEN_LOG;
+}
+
+
 void
 ui_draw( C3D_RenderTarget *target )
 {
@@ -657,6 +726,13 @@ ui_draw( C3D_RenderTarget *target )
 
 	draw_status_bar( );
 	draw_rail( );
+
+	if (scanning) {
+		draw_scanning_overlay( );
+		draw_footer( );
+		C2D_Flush( );
+		return;
+	}
 
 	switch (screen) {
 	case UI_SCREEN_SETTINGS:        draw_settings_screen( );        break;

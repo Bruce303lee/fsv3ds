@@ -14,7 +14,8 @@
  *   B            go back up to the parent
  *   X            toggle MapV / TreeV
  *   Y            screenshot -> sdmc:/fsv3ds_screenshot.ppm
- *   SELECT       rescan sdmc:/3ds from the top
+ *   SELECT       rescan the default folder from the top (Settings shows/
+ *                sets it via the Folder screen's "Use this")
  *   START        exit
  *   Touch        bottom screen: Folder/Settings/Info/Log rail, settings toggles
  */
@@ -31,9 +32,6 @@
 #include "ui.h"
 #include "viz.h"
 #include "nav.h"
-
-#define SCAN_ROOT "sdmc:/3ds"
-
 
 /* Logs where navigation currently stands -- the view root's absolute
  * path, and which child (if any) is selected. The bottom-screen
@@ -106,13 +104,16 @@ main( int argc, char **argv )
 			ui_handle_touch( touch_x, touch_y );
 
 		if (kDown & KEY_SELECT) {
-			rpc_logf( "scanning " SCAN_ROOT " ...\n" );
-
-			/* Goes through viz.c (scanfs() + shared nav reset + rebuild
-			 * whichever mode is active) rather than scanfs()+mapv_* directly
-			 * -- see mapv_scan_and_build()'s old comment for the class of
-			 * bug that separating scan from nav-reset caused once. */
-			viz_scan_and_build( SCAN_ROOT );
+			/* Goes through ui_scan_with_feedback() (a "Scanning..."
+			 * overlay frame, then viz.c's scanfs() + shared nav reset +
+			 * rebuild whichever mode is active) rather than calling
+			 * scanfs()/viz_scan_and_build() directly -- see
+			 * mapv_scan_and_build()'s old comment for the class of bug
+			 * that separating scan from nav-reset caused once, and
+			 * ui_scan_with_feedback()'s comment for why the overlay
+			 * frame matters now that the folder browser can point a
+			 * scan at anything on the card. */
+			ui_scan_with_feedback( settings_get_default_root( ) );
 			print_status( );
 		}
 

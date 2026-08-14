@@ -41,7 +41,7 @@ Text-reply commands respond with a single line and close:
 | Command | Reply | What it does |
 |---|---|---|
 | `PING` | `PONG` | Liveness check |
-| `SCAN` | `OK vertices=<n>` | Runs `viz_scan_and_build("sdmc:/3ds")`, then renders one frame so a subsequent `SHOT` reflects it immediately |
+| `SCAN` | `OK vertices=<n>` | Rescans the current default folder (`settings.c`'s `default_root`, same path physical SELECT uses -- set via the Folder screen's "Use this"), then renders one frame so a subsequent `SHOT` reflects it immediately |
 | `MODE [MAPV\|TREEV]` | `OK mode=<MAPV\|TREEV>` | With an arg, switches the active visualization mode (there's no way to press the physical X button over RPC); with no arg, just reports the current mode |
 | `KEY <NAME>` | `OK` or `ERR unknown key` | Injects a synthetic button press, merged into `hidKeysDown()` for exactly one frame. Names: `A B X Y L R START SELECT UP DOWN LEFT RIGHT` |
 | `TOUCH <x> <y>` | `OK` or `ERR usage: TOUCH x y` | Injects a synthetic tap at bottom-screen pixel coordinates (0-319, 0-239), consumed by `ui_handle_touch()` on the next frame -- the only way to drive the touch UI (Folder/Settings/Info/Log rail, settings toggles) without physically tapping the console. One tap per command, no drag/gesture support. |
@@ -110,9 +110,6 @@ header yourself — use the Python client for those.)
   stall rendering — bounded to 3 seconds via `select()` in `recv_line()`
   (devkitARM's SOC service doesn't support `SO_RCVTIMEO`, so the timeout
   is hand-rolled).
-- **`SCAN_ROOT` is duplicated** between `main.c` and `rpc.c` (both
-  `#define SCAN_ROOT "sdmc:/3ds"`). Small enough to not be worth a shared
-  header yet; keep them in sync if it changes.
 - **Deploying new code still needs FTP.** RPC can drive the *running*
   binary but obviously can't replace itself — after any rebuild, the
   cycle is: switch the console back to the FTP app, push the new

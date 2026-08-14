@@ -1,10 +1,10 @@
 /* settings.h - fsv3ds Phase 6
  *
  * User-facing settings exposed on the bottom-screen Settings panel
- * (ui.c): which color scheme is active (color.c) and whether/which
- * node labels are drawn (render.c's draw_labels()). Persisted to the
- * SD card so they survive relaunch -- see settings.c for the file
- * format/location.
+ * (ui.c): which color scheme is active (color.c), whether/which node
+ * labels are drawn (render.c's draw_labels()), and which folder SELECT/
+ * RPC SCAN rescan by default. Persisted to the SD card so they survive
+ * relaunch -- see settings.c for the file format/location.
  *
  * This module is the seam between ui.c (presentation) and the modules
  * that actually apply a setting (color.c, render.c): setters here do
@@ -41,5 +41,14 @@ void settings_set_label_mode( LabelMode mode );
 void settings_cycle_label_mode( void );
 
 const char *settings_label_mode_name( LabelMode mode );
+
+/* The path SELECT (and RPC's SCAN) rescan from, and what a fresh
+ * launch with no saved settings.cfg falls back to ("sdmc:/3ds").
+ * Returns a pointer to settings.c's own static buffer -- valid until
+ * the next settings_set_default_root() call, same convention as
+ * common.c's node_absname(). Set via the Folder screen's "Use this"
+ * (ui.c), not directly editable from the Settings screen itself. */
+const char *settings_get_default_root( void );
+void settings_set_default_root( const char *path );
 
 #endif /* FSV3DS_SETTINGS_H */

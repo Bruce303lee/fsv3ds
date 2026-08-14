@@ -32,4 +32,12 @@ void ui_draw( C3D_RenderTarget *target );
  * space hidTouchRead()/the RPC TOUCH command report in. */
 void ui_handle_touch( int x, int y );
 
+/* Scans `path` (via viz_scan_and_build()), showing a one-frame
+ * "Scanning..." overlay first so the blocking scanfs() walk that
+ * follows doesn't just freeze the app with no feedback -- shared by
+ * main.c's SELECT handler, the Folder screen's "Use this", and rpc.c's
+ * SCAN command, so all three behave identically. Switches to the Log
+ * screen once the scan completes. */
+void ui_scan_with_feedback( const char *path );
+
 #endif /* FSV3DS_UI_H */

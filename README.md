@@ -34,10 +34,12 @@ the circle pad, in stereoscopic 3D, on real 3DS hardware.
   filesystem directly, so it works before any scan too), with paging and
   a ".." row; "Use this" rescans starting at whatever folder you land on.
   Settings offers a color scheme preset picker (Default / High-Contrast /
-  Monochrome) and a label-mode toggle (Selected only / All / Off), both
+  Monochrome), a label-mode toggle (Selected only / All / Off), and shows
+  the current default scan folder (set via "Use this" above) -- all
   persisted to `sdmc:/3ds/fsv3ds/settings.cfg`; Info shows details for the
   selected node; Log shows the same scrollback the RPC `LOG` command
-  streams.
+  streams. A "Scanning..." overlay shows for any scan that takes long
+  enough to notice, rather than the app just freezing silently.
 - **A dev-only remote control service** — see [`RPC.md`](RPC.md). Not
   something the app needs to run; a debugging aid so scans, screenshots,
   button presses, and touch taps can be driven over the network during
@@ -55,7 +57,7 @@ the circle pad, in stereoscopic 3D, on real 3DS hardware.
 | B | Go back up to the parent |
 | X | Toggle MapV / TreeV |
 | Y | Screenshot → `sdmc:/fsv3ds_screenshot.ppm` |
-| SELECT | Rescan `sdmc:/3ds` from the top |
+| SELECT | Rescan the default folder from the top |
 | START | Exit |
 | Touch (bottom screen) | Folder/Settings/Info/Log rail, settings toggles |
 
