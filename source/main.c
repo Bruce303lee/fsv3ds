@@ -24,6 +24,7 @@
 #include "mapv.h"
 #include "render.h"
 #include "rpc.h"
+#include "color.h"
 
 #define SCAN_ROOT "sdmc:/3ds"
 
@@ -154,6 +155,7 @@ main( int argc, char **argv )
 	consoleSelect( &logConsole );
 
 	render_init( );
+	color_init( );
 	rpc_init( ); /* dev-only remote control -- see rpc.h */
 
 	printf( "fsv3ds -- Phase 3 (navigation)\n" );

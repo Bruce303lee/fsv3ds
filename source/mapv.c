@@ -31,6 +31,7 @@
 #include "dirtree_stub.h"
 #include "scanfs.h"
 #include "rpc.h"
+#include "color.h"
 
 #include <stdlib.h>
 #include <3ds.h> /* linearAlloc/linearFree -- GPU vertex buffers must live
@@ -59,21 +60,15 @@ static const float mapv_side_slant_ratios[NUM_NODE_TYPES] = {
 static double mapv_dir_height = 384.0;
 static double mapv_leaf_height = 128.0;
 
-/* Flat per-type colors (top face, side faces). No lighting in v1 --
- * side faces just get a darker shade of the same color as a cheap
- * depth cue. Substitutes for upstream's color.c, not yet ported. */
-static const float mapv_top_colors[NUM_NODE_TYPES][3] = {
-	{ 0.0, 0.0, 0.0 },       /* Metanode (not used) */
-	{ 0.85, 0.70, 0.30 },    /* Directory (tan) */
-	{ 0.35, 0.55, 0.85 },    /* Regular file (blue) */
-	{ 0.55, 0.85, 0.55 },    /* Symlink (green) */
-	{ 0.85, 0.55, 0.85 },    /* FIFO */
-	{ 0.85, 0.85, 0.45 },    /* Socket */
-	{ 0.85, 0.45, 0.45 },    /* Char device */
-	{ 0.65, 0.45, 0.85 },    /* Block device */
-	{ 0.6, 0.6, 0.6 }        /* Unknown */
-};
+/* Side faces get a darker shade of the node's own color (color.c) as a
+ * cheap depth cue -- no lighting in v1. */
 #define SIDE_SHADE 0.65f
+/* Fallback if a node's color hasn't been assigned for some reason
+ * (shouldn't happen post-Phase-4 -- color_assign_recursive() covers
+ * the whole tree -- but emit_node_box() shouldn't read a NULL pointer
+ * if it somehow does). Bright red so a real bug here is obvious rather
+ * than silently rendering black. */
+static const RGBcolor fallback_color = { 1.0f, 0.0f, 0.0f };
 
 
 /* Returns the z-position of the bottom of a node (sum of ancestor heights) */
@@ -377,13 +372,17 @@ emit_node_box( GNode *node, boolean is_selected )
 	double k = mapv_side_slant_ratios[type];
 	double offx = MIN(gp->height, k * dims_x);
 	double offy = MIN(gp->height, k * dims_y);
+	const RGBcolor *node_color = NODE_DESC(node)->color;
 	float top_col[3], side_col[3];
 	double bl[3], br[3], fr[3], fl[3];   /* bottom corners, z0 */
 	double tbl[3], tbr[3], tfr[3], tfl[3]; /* top corners (inset), zt */
 
-	top_col[0] = mapv_top_colors[type][0];
-	top_col[1] = mapv_top_colors[type][1];
-	top_col[2] = mapv_top_colors[type][2];
+	if (node_color == NULL)
+		node_color = &fallback_color;
+
+	top_col[0] = node_color->r;
+	top_col[1] = node_color->g;
+	top_col[2] = node_color->b;
 
 	side_col[0] = top_col[0] * SIDE_SHADE;
 	side_col[1] = top_col[1] * SIDE_SHADE;
@@ -729,6 +728,13 @@ mapv_reset_navigation( void )
 {
 	view_root = root_dnode;
 	selected_node = root_dnode->children;
+
+	/* Piggybacked here (rather than called separately by every scan
+	 * path) so it can't be forgotten by one of them the way the
+	 * navigation reset itself once was -- see mapv_scan_and_build()'s
+	 * comment. Assigns the whole tree, not just what's currently
+	 * drawn, so colors are already there if you drill somewhere new. */
+	color_assign_recursive( globals.fstree );
 }
 
 

@@ -82,22 +82,30 @@ typedef enum {
 #define NODE_IS_DIR(node)       (NODE_DESC(node)->type == NODE_DIRECTORY)
 #define NODE_IS_METANODE(node)  (NODE_DESC(node)->type == NODE_METANODE)
 
+/* RGB color definition (components are in range [0, 1]) */
+typedef struct _RGBcolor RGBcolor;
+struct _RGBcolor {
+	float r;
+	float g;
+	float b;
+};
+
 /* Base node descriptor. Describes a filesystem node
  * (file/symlink/whatever) */
 typedef struct _NodeDesc NodeDesc;
 struct _NodeDesc {
-	NodeType    type;          /* Type of node */
-	unsigned int id;           /* Unique ID number */
-	const char  *name;         /* Base name (w/o directory) */
-	int64       size;          /* Size (bytes) */
-	int64       size_alloc;    /* Size allocation on storage medium */
-	bitfield    perms : 10;    /* Permission flags */
-	bitfield    flags : 2;     /* Extra (mode-specific) flags */
-	time_t      atime;         /* Last access time */
-	time_t      mtime;         /* Last modification time */
-	time_t      ctime;         /* Last attribute change time */
-	const void  *color;        /* Node color (RGBcolor*, unused until Phase 4) */
-	double      geomparams[5]; /* Geometry parameters (Phase 2) */
+	NodeType     type;          /* Type of node */
+	unsigned int id;            /* Unique ID number */
+	const char   *name;         /* Base name (w/o directory) */
+	int64        size;          /* Size (bytes) */
+	int64        size_alloc;    /* Size allocation on storage medium */
+	bitfield     perms : 10;    /* Permission flags */
+	bitfield     flags : 2;     /* Extra (mode-specific) flags */
+	time_t       atime;         /* Last access time */
+	time_t       mtime;         /* Last modification time */
+	time_t       ctime;         /* Last attribute change time */
+	const RGBcolor *color;      /* Node color -- see color.c, NULL until color_assign_recursive() runs */
+	double       geomparams[5]; /* Geometry parameters (Phase 2) */
 };
 
 /* Directories have their own extended descriptor */
