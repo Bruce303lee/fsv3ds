@@ -197,20 +197,47 @@ key_from_name( const char *name )
 }
 
 
+/* Every command line is "<user> <pass> <COMMAND> [args...]" -- see
+ * RPC.md. Credentials travel with every request rather than via a
+ * separate login step because each request is its own short-lived
+ * TCP connection (rpc_poll() accepts, handles exactly one line, and
+ * closes), not a persistent session that could authenticate once. */
 static void
 handle_command( int csock, char *line )
 {
-	char *args = strchr( line, ' ' );
+	char *user, *pass, *cmd, *args;
+	static const char usage[] = "ERR usage: <user> <pass> <COMMAND> [args...]\n";
 
-	if (args != NULL) {
-		*args = '\0';
-		++args;
+	user = line;
+	pass = strchr( user, ' ' );
+	if (pass == NULL) {
+		send( csock, usage, sizeof(usage) - 1, 0 );
+		return;
+	}
+	*pass++ = '\0';
+
+	cmd = strchr( pass, ' ' );
+	if (cmd == NULL) {
+		send( csock, usage, sizeof(usage) - 1, 0 );
+		return;
+	}
+	*cmd++ = '\0';
+
+	args = strchr( cmd, ' ' );
+	if (args != NULL)
+		*args++ = '\0';
+
+	if (strcmp( user, settings_get_rpc_user( ) ) != 0 ||
+	    strcmp( pass, settings_get_rpc_pass( ) ) != 0) {
+		static const char unauth[] = "ERR unauthorized\n";
+		send( csock, unauth, sizeof(unauth) - 1, 0 );
+		return;
 	}
 
-	if (!strcmp( line, "PING" )) {
+	if (!strcmp( cmd, "PING" )) {
 		send( csock, "PONG\n", 5, 0 );
 	}
-	else if (!strcmp( line, "SCAN" )) {
+	else if (!strcmp( cmd, "SCAN" )) {
 		char reply[128];
 		unsigned int nverts;
 		int len;
@@ -232,7 +259,7 @@ handle_command( int csock, char *line )
 		len = snprintf( reply, sizeof(reply), "OK vertices=%u\n", nverts );
 		send( csock, reply, len, 0 );
 	}
-	else if (!strcmp( line, "MODE" )) {
+	else if (!strcmp( cmd, "MODE" )) {
 		char reply[64];
 		int len;
 
@@ -251,7 +278,7 @@ handle_command( int csock, char *line )
 		len = snprintf( reply, sizeof(reply), "OK mode=%s\n", viz_get_mode( ) == VIZ_MAPV ? "MAPV" : "TREEV" );
 		send( csock, reply, len, 0 );
 	}
-	else if (!strcmp( line, "SHOT" )) {
+	else if (!strcmp( cmd, "SHOT" )) {
 		/* Optional arg selects which screen: TOP (default, back-compat
 		 * with clients that predate the bottom-screen UI) or BOTTOM. */
 		if (args != NULL && !strcmp( args, "BOTTOM" )) {
@@ -277,7 +304,7 @@ handle_command( int csock, char *line )
 			send( csock, rgb, sizeof(rgb), 0 );
 		}
 	}
-	else if (!strcmp( line, "LOG" )) {
+	else if (!strcmp( cmd, "LOG" )) {
 		char header[32];
 		int hlen;
 
@@ -286,7 +313,7 @@ handle_command( int csock, char *line )
 		if (log_len > 0)
 			send( csock, log_buf, log_len, 0 );
 	}
-	else if (!strcmp( line, "KEY" ) && args != NULL) {
+	else if (!strcmp( cmd, "KEY" ) && args != NULL) {
 		u32 k = key_from_name( args );
 
 		if (k != 0) {
@@ -296,7 +323,7 @@ handle_command( int csock, char *line )
 		else
 			send( csock, "ERR unknown key\n", 16, 0 );
 	}
-	else if (!strcmp( line, "TOUCH" ) && args != NULL) {
+	else if (!strcmp( cmd, "TOUCH" ) && args != NULL) {
 		int x, y;
 
 		if (sscanf( args, "%d %d", &x, &y ) == 2) {

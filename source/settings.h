@@ -51,4 +51,13 @@ const char *settings_label_mode_name( LabelMode mode );
 const char *settings_get_default_root( void );
 void settings_set_default_root( const char *path );
 
+/* Credentials the RPC service (rpc.c) requires on every request --
+ * see rpc.c's handle_command(). No Settings-screen UI to change these
+ * (the app has no on-screen keyboard yet); change them by editing
+ * settings.cfg's rpc_user=/rpc_pass= lines directly over FTP, then
+ * relaunch. Returns settings.c's own static buffers, same convention
+ * as settings_get_default_root(). */
+const char *settings_get_rpc_user( void );
+const char *settings_get_rpc_pass( void );
+
 #endif /* FSV3DS_SETTINGS_H */

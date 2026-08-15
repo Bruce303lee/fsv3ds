@@ -5,9 +5,14 @@ A development-only remote control port built into fsv3ds (`source/rpc.c`,
 output, and simulate button presses over the network instead of
 physically operating the console or shuttling files over FTP.
 
-**Not a shipped feature.** It's a plaintext, unauthenticated TCP port with
-no access control. Fine on a private home LAN while actively developing;
-never expose it beyond that.
+**Not a shipped feature**, but deliberately left in the release build --
+still a plaintext TCP port, but every request now requires a username and
+password (`settings.c`'s `rpc_user`/`rpc_pass`, stored in
+`settings.cfg`), so it's not wide open to anything else on the same LAN.
+Change the defaults by editing `settings.cfg`'s `rpc_user=`/`rpc_pass=`
+lines over FTP and relaunching. Credentials travel in plaintext (no
+TLS), so this is still only appropriate on a trusted home LAN, not the
+open internet.
 
 ## Status: ready to connect
 
@@ -32,9 +37,22 @@ logged — happens without touching the handheld at all.
 
 ## Protocol
 
-Connect, send one line (`COMMAND` or `COMMAND ARGS`, newline-terminated),
-read the response, connection closes. Simple request/response, no
-persistent session state.
+Connect, send one line, read the response, connection closes. Simple
+request/response, no persistent session state -- which is exactly why
+credentials travel with every single request rather than a one-time
+login: there's no session for a login to attach to.
+
+Every line has the form:
+
+```
+<user> <pass> <COMMAND> [args...]
+```
+
+e.g. `fsv3ds fsv3ds-2026 PING`. A bad or missing user/pass gets back
+`ERR unauthorized` before the real command is even looked at; a
+malformed line (missing the user/pass fields entirely) gets back
+`ERR usage: <user> <pass> <COMMAND> [args...]`. Everything below omits
+the `<user> <pass>` prefix for brevity -- add it to every example.
 
 Text-reply commands respond with a single line and close:
 
@@ -55,7 +73,7 @@ bytes, then close:
 | `SHOT BOTTOM` | `PPM <size>\n` | Same, but a 320x240 capture of the bottom screen (the touch UI) instead -- always mono, no stereo there |
 | `LOG` | `LOG <size>\n` | The contents of the in-memory log ring buffer (4KB, fills once and stops — restart the app to clear it). The same content is shown live on the bottom screen's Log panel. |
 
-Unrecognized commands get back `ERR unknown command`.
+Unrecognized commands (after auth succeeds) get back `ERR unknown command`.
 
 ### What ends up in the log
 
@@ -77,7 +95,10 @@ logged — so the ring buffer doesn't fill with noise on a single scan.
 ## Client
 
 `rpc_client.py` (repo root's parent, `/home/kali/Projects/3ds/rpc_client.py`)
-is a minimal reference client:
+is a minimal reference client. It prepends the credentials (`RPC_USER`/
+`RPC_PASS` constants at the top of the script, matching `settings.c`'s
+defaults) to every command automatically, so callers just pass the
+command itself:
 
 ```bash
 python3 rpc_client.py PING
@@ -89,10 +110,11 @@ python3 rpc_client.py KEY A             # simulate pressing A next frame
 python3 rpc_client.py TOUCH 36 94       # simulate tapping bottom-screen (36,94)
 ```
 
-Or talk to it directly with netcat for one-off text commands:
+Or talk to it directly with netcat for one-off text commands (remember
+the credentials prefix -- this won't work without it):
 
 ```bash
-printf 'PING\n' | nc -q1 192.168.13.142 5151
+printf 'fsv3ds fsv3ds-2026 PING\n' | nc -q1 192.168.13.142 5151
 ```
 
 (netcat is awkward for `SHOT`/`LOG` since you'd have to parse the binary
