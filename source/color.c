@@ -38,6 +38,10 @@ typedef enum {
 	COLOR_CAT_UNKNOWN,
 	COLOR_CAT_ROM,
 	COLOR_CAT_HOMEBREW,
+	COLOR_CAT_3DSX, /* .3dsx specifically -- split out of COLOR_CAT_HOMEBREW
+	                  * on request, light blue, so the directly-launchable
+	                  * files stand out from installables (.cia/.cxi/.cci)
+	                  * and metadata (.smdh) that stay gold */
 	COLOR_CAT_ARCHIVE,
 	COLOR_CAT_IMAGE,
 	COLOR_CAT_AUDIO_VIDEO,
@@ -92,7 +96,7 @@ static const ExtColor ext_colors[] = {
 	                              * is full of *.bin */
 
 	/* 3DS homebrew/installables */
-	{ "*.3dsx", COLOR_CAT_HOMEBREW },
+	{ "*.3dsx", COLOR_CAT_3DSX },
 	{ "*.cia",  COLOR_CAT_HOMEBREW },
 	{ "*.cxi",  COLOR_CAT_HOMEBREW },
 	{ "*.cci",  COLOR_CAT_HOMEBREW },
@@ -160,6 +164,7 @@ static const RGBcolor color_schemes[NUM_COLOR_SCHEMES][NUM_COLOR_CATEGORIES] = {
 		[COLOR_CAT_UNKNOWN]          = { 0.60, 0.60, 0.60 },
 		[COLOR_CAT_ROM]              = { 0.35, 0.85, 0.35 }, /* green */
 		[COLOR_CAT_HOMEBREW]         = { 0.95, 0.75, 0.25 }, /* gold */
+		[COLOR_CAT_3DSX]             = { 0.45, 0.75, 1.00 }, /* light blue */
 		[COLOR_CAT_ARCHIVE]          = { 0.85, 0.30, 0.30 }, /* red */
 		[COLOR_CAT_IMAGE]            = { 0.85, 0.35, 0.85 }, /* magenta */
 		[COLOR_CAT_AUDIO_VIDEO]      = { 0.35, 0.85, 0.85 }, /* cyan */
@@ -177,6 +182,7 @@ static const RGBcolor color_schemes[NUM_COLOR_SCHEMES][NUM_COLOR_CATEGORIES] = {
 		[COLOR_CAT_UNKNOWN]          = { 0.80, 0.80, 0.80 },
 		[COLOR_CAT_ROM]              = { 0.00, 1.00, 0.00 },
 		[COLOR_CAT_HOMEBREW]         = { 1.00, 0.60, 0.00 },
+		[COLOR_CAT_3DSX]             = { 0.30, 0.80, 1.00 },
 		[COLOR_CAT_ARCHIVE]          = { 1.00, 0.00, 0.00 },
 		[COLOR_CAT_IMAGE]            = { 1.00, 0.00, 1.00 },
 		[COLOR_CAT_AUDIO_VIDEO]      = { 0.00, 1.00, 1.00 },
@@ -194,6 +200,7 @@ static const RGBcolor color_schemes[NUM_COLOR_SCHEMES][NUM_COLOR_CATEGORIES] = {
 		[COLOR_CAT_UNKNOWN]          = { 0.45, 0.45, 0.45 },
 		[COLOR_CAT_ROM]              = { 0.85, 0.85, 0.85 },
 		[COLOR_CAT_HOMEBREW]         = { 0.90, 0.90, 0.90 },
+		[COLOR_CAT_3DSX]             = { 0.78, 0.78, 0.78 },
 		[COLOR_CAT_ARCHIVE]          = { 0.50, 0.50, 0.50 },
 		[COLOR_CAT_IMAGE]            = { 0.70, 0.70, 0.70 },
 		[COLOR_CAT_AUDIO_VIDEO]      = { 0.70, 0.70, 0.70 },
