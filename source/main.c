@@ -104,17 +104,19 @@ main( int argc, char **argv )
 			ui_handle_touch( touch_x, touch_y );
 
 		if (kDown & KEY_SELECT) {
-			/* Goes through ui_scan_with_feedback() (a "Scanning..."
-			 * overlay frame, then viz.c's scanfs() + shared nav reset +
-			 * rebuild whichever mode is active) rather than calling
-			 * scanfs()/viz_scan_and_build() directly -- see
-			 * mapv_scan_and_build()'s old comment for the class of bug
-			 * that separating scan from nav-reset caused once, and
-			 * ui_scan_with_feedback()'s comment for why the overlay
-			 * frame matters now that the folder browser can point a
-			 * scan at anything on the card. */
-			ui_scan_with_feedback( settings_get_default_root( ) );
-			print_status( );
+			/* Deferred -- ui_request_scan() only arms the "Scanning..."
+			 * overlay here; ui_process_pending_scan() below actually
+			 * runs scanfs() + shared nav reset + rebuild a couple
+			 * iterations from now, once the overlay's had a frame to
+			 * show. See ui_request_scan()'s comment for why this isn't
+			 * done synchronously right here (GPU command buffer
+			 * overflow), and mapv_scan_and_build()'s old comment for the
+			 * class of bug that separating scan from nav-reset caused
+			 * once -- ui_process_pending_scan() goes through
+			 * viz_scan_and_build() for that same reason. Nothing to log
+			 * here: the footer/log already reflect the new state live
+			 * once the scan actually lands. */
+			ui_request_scan( settings_get_default_root( ) );
 		}
 
 		if (kDown & KEY_A) {
@@ -182,6 +184,11 @@ main( int argc, char **argv )
 		 * (confirmed against devkitPro's gpusprites example, which
 		 * live-updates a GFX_BOTTOM console every frame the same way). */
 		render_frame( );
+
+		/* Must come after render_frame(), not before -- see
+		 * ui_request_scan()'s comment. Does nothing unless a scan is
+		 * pending. */
+		ui_process_pending_scan( );
 
 		rpc_poll( );
 	}

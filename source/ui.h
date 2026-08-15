@@ -32,12 +32,22 @@ void ui_draw( C3D_RenderTarget *target );
  * space hidTouchRead()/the RPC TOUCH command report in. */
 void ui_handle_touch( int x, int y );
 
-/* Scans `path` (via viz_scan_and_build()), showing a one-frame
+/* Requests a scan of `path` (via viz_scan_and_build()), showing a
  * "Scanning..." overlay first so the blocking scanfs() walk that
- * follows doesn't just freeze the app with no feedback -- shared by
- * main.c's SELECT handler, the Folder screen's "Use this", and rpc.c's
- * SCAN command, so all three behave identically. Switches to the Log
- * screen once the scan completes. */
-void ui_scan_with_feedback( const char *path );
+ * follows doesn't just freeze the app with no feedback. Deferred, not
+ * immediate: only arms the overlay here; the caller MUST call
+ * ui_process_pending_scan() once per main-loop iteration (right after
+ * render_frame(), see main.c) for anything to actually happen -- that
+ * indirection is deliberate, see ui_request_scan()'s comment in ui.c
+ * for the GPU command buffer overflow it avoids. Used by main.c's
+ * SELECT handler and the Folder screen's "Use this"; rpc.c's SCAN
+ * command deliberately calls viz_scan_and_build() directly instead
+ * (see its own comment). Switches to the Log screen once the scan
+ * actually completes. */
+void ui_request_scan( const char *path );
+
+/* Call exactly once per main-loop iteration, after render_frame() --
+ * no-op unless a scan is pending (see ui_request_scan()). */
+void ui_process_pending_scan( void );
 
 #endif /* FSV3DS_UI_H */

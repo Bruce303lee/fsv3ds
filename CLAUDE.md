@@ -146,6 +146,26 @@ There is no local devkitARM toolchain in this environment. The loop is:
   **B,G,R** in memory (`GSP_BGR8_OES`) — see `render_capture_rgb()`.
 - GPU vertex buffers must live in **linear-accessible memory**
   (`linearAlloc`/`linearFree`), not the regular heap.
+- **Never call `render_frame()` more than once per main-loop iteration**
+  outside of `main()`'s own single call site. A "Scanning..." overlay
+  feature briefly called `render_frame()` an extra time from inside an
+  action handler (to present the overlay before a blocking `scanfs()`
+  call), stacking 2-3 citro3d frame cycles within one call chain
+  instead of the normal one-per-iteration. On a large enough scene this
+  overflowed libctru's GPU command buffer (`GPUCMD_AddInternal` calling
+  `svcBreak` panic — confirmed via a Luma3DS crash dump, see
+  `luma3ds_exception_dump_parser` on GitHub for the real parser; the
+  ARM11 dump's LR pointed straight at `GPUCMD_AddInternal` in
+  `libctru/source/gpu/gpu.c`). Crashed the whole console (needed a
+  physical restart), not just the app. Fixed by making the overlay
+  deferred/2-phase (`ui_request_scan()` + `ui_process_pending_scan()`
+  in `ui.c`, the latter called right after `main()`'s own
+  `render_frame()`) instead of ever calling `render_frame()` from
+  anywhere else. `rpc.c`'s `SCAN` command deliberately does NOT use
+  this path at all — it calls `viz_scan_and_build()` directly, since an
+  RPC client isn't watching the physical screen mid-round-trip anyway,
+  so the overlay buys nothing there and it's one less place stacking
+  extra frame cycles.
 
 ## Other real bugs already found and fixed (context if similar symptoms return)
 

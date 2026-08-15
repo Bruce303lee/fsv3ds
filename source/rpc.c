@@ -17,7 +17,6 @@
 #include "treev.h"
 #include "viz.h"
 #include "render.h"
-#include "ui.h"
 #include "settings.h"
 
 #define SOC_ALIGN      0x1000
@@ -216,8 +215,18 @@ handle_command( int csock, char *line )
 		unsigned int nverts;
 		int len;
 
-		ui_scan_with_feedback( settings_get_default_root( ) ); /* same overlay/nav-reset path as physical SELECT */
-		render_frame( ); /* so an immediate SHOT reflects the final (post-scan) scene */
+		/* Deliberately calls viz_scan_and_build() directly rather than
+		 * going through ui_request_scan()'s deferred "Scanning..."
+		 * overlay path (main.c's SELECT handler does use that) -- this
+		 * reply needs the post-scan vertex count synchronously, and
+		 * nobody's watching the physical screen mid-RPC-round-trip
+		 * anyway, so the overlay buys nothing here. Also avoids stacking
+		 * an extra render_frame() call on top of this handler's own one
+		 * below -- confirmed via a Luma3DS crash dump that enough
+		 * stacked citro3d frame cycles in one call chain overflows
+		 * libctru's GPU command buffer on a large enough scene. */
+		viz_scan_and_build( settings_get_default_root( ) );
+		render_frame( ); /* so an immediate SHOT reflects the new scene */
 
 		nverts = (viz_get_mode( ) == VIZ_MAPV) ? mapv_vertex_count( ) : treev_vertex_count( );
 		len = snprintf( reply, sizeof(reply), "OK vertices=%u\n", nverts );
