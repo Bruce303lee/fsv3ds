@@ -103,6 +103,13 @@ main( int argc, char **argv )
 		if (touched)
 			ui_handle_touch( touch_x, touch_y );
 
+		/* Info screen's "Launch" action (see launcher.h) already handed
+		 * a target off to Luma3DS's hb:ldr by this point -- break out
+		 * the same way KEY_START does so the normal cleanup/exit path
+		 * runs and hb:ldr can actually take over. */
+		if (ui_take_launch_request( ))
+			break;
+
 		if (kDown & KEY_SELECT) {
 			/* Deferred -- ui_request_scan() only arms the "Scanning..."
 			 * overlay here; ui_process_pending_scan() below actually

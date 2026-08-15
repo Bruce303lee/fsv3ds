@@ -16,6 +16,8 @@
 
 #include <citro3d.h>
 
+#include "common.h" /* for gboolean, used by ui_take_launch_request() */
+
 void ui_init( void );
 void ui_fini( void );
 
@@ -49,5 +51,14 @@ void ui_request_scan( const char *path );
 /* Call exactly once per main-loop iteration, after render_frame() --
  * no-op unless a scan is pending (see ui_request_scan()). */
 void ui_process_pending_scan( void );
+
+/* One-shot, consumed-once flag: TRUE if the Info screen's "Launch"
+ * action has successfully handed a target off to launcher_launch()
+ * (see launcher.h) since the last call. main.c should check this each
+ * iteration (right after touch handling) and break its main loop on
+ * TRUE, the same shutdown path as the physical START button -- that's
+ * what lets Luma3DS's hb:ldr actually take over once this process
+ * exits. */
+gboolean ui_take_launch_request( void );
 
 #endif /* FSV3DS_UI_H */

@@ -10,6 +10,7 @@
 #include "settings.h"
 #include "rpc.h"
 #include "imgview.h"
+#include "launcher.h"
 
 #include <sys/stat.h>
 #include <strings.h>
@@ -81,6 +82,15 @@ static int browse_page = 0;
  * freezes the app with no feedback until it's done. */
 static gboolean scanning = FALSE;
 static char scanning_path[BROWSE_PATH_LEN];
+
+/* TRUE once launcher_launch() has succeeded for the Info screen's
+ * "Launch" row -- main.c's loop checks ui_take_launch_request() right
+ * after touch handling and breaks out (same shutdown path as START)
+ * so hb:ldr can take over once this process actually exits. No
+ * deferred/2-phase dance needed here the way scanning has -- unlike a
+ * blocking scanfs() call, launcher_launch() is just a couple of IPC
+ * round-trips, not another render_frame() call. */
+static gboolean launch_pending = FALSE;
 
 /* --- Text/hex viewer state: opened from the Info screen for the
  * currently selected file. Reads a page at a time straight off the SD
@@ -449,6 +459,13 @@ is_image_file( const char *name )
 {
 	return has_ext( name, "bmp" ) || has_ext( name, "png" ) ||
 	       has_ext( name, "jpg" ) || has_ext( name, "jpeg" );
+}
+
+
+static gboolean
+is_3dsx_file( const char *name )
+{
+	return has_ext( name, "3dsx" );
 }
 
 
@@ -854,7 +871,27 @@ draw_info_screen( void )
 		draw_text( "View image", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_YELLOW );
 		y += line_h;
 	}
+	if (is_3dsx_file( NODE_DESC(sel)->name ) && launcher_available( )) {
+		draw_text( "Launch", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_YELLOW );
+		y += line_h;
+	}
 	draw_text( "Open as hex", (float)CONTENT_X, y, UI_TEXT_SCALE, COLOR_YELLOW );
+}
+
+
+/* Best-effort feedback on failure -- launcher_available() already
+ * gated whether this row was even shown, so a failure here means the
+ * IPC call itself was rejected (bad path, hb:ldr hiccup). Nothing
+ * destructive happened; just log it and stay put. */
+static void
+launch_selected_3dsx( const char *path )
+{
+	if (launcher_launch( path )) {
+		rpc_logf( "launching %s ...\n", path );
+		launch_pending = TRUE;
+	}
+	else
+		rpc_logf( "launch failed: %s\n", path );
 }
 
 
@@ -882,6 +919,13 @@ handle_info_touch( int x, int y )
 	if (is_image_file( NODE_DESC(sel)->name )) {
 		if ((float)y >= row_y && (float)y < row_y + 18.0f) {
 			image_viewer_open( node_absname( sel ) );
+			return;
+		}
+		row_y += 18.0f;
+	}
+	if (is_3dsx_file( NODE_DESC(sel)->name ) && launcher_available( )) {
+		if ((float)y >= row_y && (float)y < row_y + 18.0f) {
+			launch_selected_3dsx( node_absname( sel ) );
 			return;
 		}
 		row_y += 18.0f;
@@ -1184,6 +1228,16 @@ ui_process_pending_scan( void )
 	rpc_logf( "scanning %s ...\n", pending_scan_path );
 	viz_scan_and_build( pending_scan_path );
 	screen = UI_SCREEN_LOG;
+}
+
+
+gboolean
+ui_take_launch_request( void )
+{
+	gboolean r = launch_pending;
+
+	launch_pending = FALSE;
+	return r;
 }
 
 
