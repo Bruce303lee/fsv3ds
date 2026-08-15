@@ -9,6 +9,7 @@
 #include "color.h"
 #include "settings.h"
 #include "rpc.h"
+#include "imgview.h"
 
 #include <sys/stat.h>
 #include <strings.h>
@@ -131,6 +132,9 @@ ui_init( void )
 void
 ui_fini( void )
 {
+	/* Must run before render_fini()'s C3D_Fini() -- main.c's shutdown
+	 * order (ui_fini() then render_fini()) already guarantees this. */
+	imgview_close( );
 	if (ptmu_ok)
 		ptmuExit( );
 	C2D_TextBufDelete( textBuf );
@@ -443,9 +447,8 @@ is_text_file( const char *name )
 static gboolean
 is_image_file( const char *name )
 {
-	/* BMP only for now -- PNG/JPEG need a real decoder library this
-	 * port doesn't link yet. */
-	return has_ext( name, "bmp" );
+	return has_ext( name, "bmp" ) || has_ext( name, "png" ) ||
+	       has_ext( name, "jpg" ) || has_ext( name, "jpeg" );
 }
 
 
@@ -527,6 +530,20 @@ hex_viewer_open( const char *path )
 	viewer_file_size = (stat( path, &st ) == 0) ? (long)st.st_size : 0;
 	hex_viewer_load_page( );
 	screen = UI_SCREEN_HEX_VIEWER;
+}
+
+
+/* Decode failure isn't treated specially here -- draw_image_viewer_screen()
+ * checks imgview_error() itself and shows it in place of the image, same
+ * as the text/hex viewers show "(empty or unreadable)" rather than
+ * refusing to open. */
+static void
+image_viewer_open( const char *path )
+{
+	strncpy( viewer_path, path, sizeof(viewer_path) - 1 );
+	viewer_path[sizeof(viewer_path) - 1] = '\0';
+	imgview_open( path );
+	screen = UI_SCREEN_IMAGE_VIEWER;
 }
 
 
@@ -707,6 +724,45 @@ handle_hex_viewer_touch( int x, int y )
 }
 
 
+/* --- IMAGE viewer -- no pagination, so no shared header with the
+ * text/hex viewers above; leaving via the rail's "Info" button works
+ * the same way it does for those (ui_handle_touch's rail dispatch
+ * always resets `screen` to UI_SCREEN_INFO regardless of what's
+ * currently active), so this needs no touch handler of its own. */
+
+static void
+draw_image_viewer_screen( void )
+{
+	char pbuf[36];
+	size_t len = strlen( viewer_path );
+	const char *err;
+
+	if (len >= sizeof(pbuf)) {
+		pbuf[0] = pbuf[1] = pbuf[2] = '.';
+		strncpy( pbuf + 3, viewer_path + (len - (sizeof(pbuf) - 4)), sizeof(pbuf) - 4 );
+		pbuf[sizeof(pbuf) - 1] = '\0';
+	}
+	else
+		strcpy( pbuf, viewer_path );
+	draw_text( pbuf, (float)CONTENT_X, (float)CONTENT_Y, 0.36f, COLOR_TEXT );
+
+	err = imgview_error( );
+	if (err != NULL) {
+		draw_text( err, (float)CONTENT_X, (float)(CONTENT_Y + 20), 0.34f, COLOR_TEXT_DIM );
+		return;
+	}
+
+	{
+		char dimbuf[24];
+
+		snprintf( dimbuf, sizeof(dimbuf), "%dx%d", imgview_width( ), imgview_height( ) );
+		draw_text( dimbuf, (float)CONTENT_X, (float)(CONTENT_Y + 18), 0.3f, COLOR_TEXT_DIM );
+	}
+
+	imgview_draw( (float)CONTENT_X, (float)(CONTENT_Y + 36), (float)CONTENT_W, (float)(CONTENT_H - 36) );
+}
+
+
 /* --- INFO screen: details for the currently selected node --- */
 
 static void
@@ -825,7 +881,7 @@ handle_info_touch( int x, int y )
 	}
 	if (is_image_file( NODE_DESC(sel)->name )) {
 		if ((float)y >= row_y && (float)y < row_y + 18.0f) {
-			/* image_viewer_open() -- added alongside the BMP decoder */
+			image_viewer_open( node_absname( sel ) );
 			return;
 		}
 		row_y += 18.0f;
@@ -1156,6 +1212,7 @@ ui_draw( C3D_RenderTarget *target )
 	case UI_SCREEN_FOLDER_BROWSER:  draw_folder_browser_screen( );  break;
 	case UI_SCREEN_TEXT_VIEWER:     draw_text_viewer_screen( );     break;
 	case UI_SCREEN_HEX_VIEWER:      draw_hex_viewer_screen( );      break;
+	case UI_SCREEN_IMAGE_VIEWER:    draw_image_viewer_screen( );    break;
 	case UI_SCREEN_LOG:
 	default:                        draw_log_screen( );             break;
 	}

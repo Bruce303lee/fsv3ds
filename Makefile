@@ -40,13 +40,16 @@ CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 ASFLAGS := -g $(ARCH)
 LDFLAGS  = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS    := -lcitro2d -lcitro3d -lctru -lm
+# -lpng16 before -lz (libpng depends on zlib); libjpeg-turbo has no such
+# ordering requirement.
+LIBS    := -lcitro2d -lcitro3d -lctru -lpng16 -ljpeg -lz -lm
 
 #-------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level
 # containing include and lib
 #-------------------------------------------------------------------------------
-LIBDIRS := $(CTRULIB)
+PORTLIBS := $(DEVKITPRO)/portlibs/3ds
+LIBDIRS  := $(CTRULIB) $(PORTLIBS)
 
 #-------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add
@@ -74,7 +77,7 @@ export OFILES          =  $(OFILES_BIN) $(OFILES_SOURCES)
 export HFILES          := $(PICAFILES:.v.pica=_shbin.h)
 
 export INCLUDE  :=  $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
-                     -I$(CURDIR)/$(BUILD) -I$(CTRULIB)/include
+                     -I$(CURDIR)/$(BUILD) -I$(CTRULIB)/include -I$(PORTLIBS)/include
 
 export LIBPATHS :=  $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 

@@ -215,6 +215,24 @@ There is no local devkitARM toolchain in this environment. The loop is:
   displayed). `ui.c`'s `format_time()` shows "unknown" rather than the
   literal epoch date for `t == 0` -- if atime/ctime ever get surfaced
   somewhere too, they'll need the same guard.
+- **PICA200's `GPU_RGBA8` texture format stores each pixel as
+  A,B,G,R in ascending memory address** -- the reverse of the R,G,B,A
+  order libpng/libjpeg-turbo/any hand-rolled decoder naturally
+  produces (and the reverse of what `GX_TRANSFER_FMT_RGBA8` expects
+  for `GX_DisplayTransfer`, if you're loading a texture that way --
+  don't assume the two "RGBA8" labels share a byte order). Every
+  image `imgview.c` decoded initially displayed with badly wrong
+  colors/transparency from this, and it was NOT obvious from looking
+  at real photos/icons -- they still looked *plausible* (citro2d
+  alpha-blends against the background, so a scrambled alpha channel
+  from this bug just looks like a moody/tinted photo, not garbage).
+  Only caught with a synthetic ground-truth test image (a 4-quadrant
+  red/green/blue/yellow solid-color BMP) where the wrong output was
+  algebraically undeniable. **Lesson: verifying a decoded image
+  *looks like a plausible photo* is not the same as verifying it's
+  *correct* -- for any texture/pixel-format work, test with a
+  synthetic image with known exact pixel values, not a real photo.**
+  See `imgview.c`'s `swizzle_to_texture()`.
 
 ## When adding new navigation/camera features
 
