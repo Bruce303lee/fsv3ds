@@ -4,3 +4,6 @@ build/
 *.smdh
 *.map
 *.lst
+*.cia
+*.bnr
+*.icn
