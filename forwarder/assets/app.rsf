@@ -27,11 +27,51 @@ AccessControlInfo:
   # ExtData
   UseExtSaveData                : false
 
-  # FileSystemAccess/IoAccessControl deliberately omitted -- this
-  # forwarder never touches the filesystem beyond what libctru's own
-  # runtime init needs by default (no explicit fs:USER archive calls
-  # in source/main.c at all), so it gets none of the broad NAND/SD
-  # access categories a "real" app like a save manager would need.
+  # FileSystemAccess/IoAccessControl -- previously omitted on the
+  # (wrong) assumption that a forwarder with no explicit fs:USER calls
+  # needs none of this. In practice the CIA never got past launch: no
+  # diagnostic output ever ran (not even the very first line, written
+  # before any hb:ldr call) and no crash dump was ever generated
+  # either, across three different main.c builds -- consistent with
+  # the process manager silently refusing to start the title at all
+  # over an incomplete ACI, not an application-level bug. Restored
+  # verbatim from Checkpoint's own working app.rsf (github.com/
+  # FlagBrew/Checkpoint, 3ds/assets/app.rsf) rather than hand-trimmed,
+  # same reasoning as the SystemCallAccess block below: this is a
+  # proven-working baseline, and a wrong guess at a "minimal" subset
+  # just costs another full install/launch round-trip to find out.
+  FileSystemAccess:
+   - CategorySystemApplication
+   - CategoryHardwareCheck
+   - CategoryFileSystemTool
+   - Debug
+   - TwlCardBackup
+   - TwlNandData
+   - Boss
+   - DirectSdmc
+   - Core
+   - CtrNandRo
+   - CtrNandRw
+   - CtrNandRoWrite
+   - CategorySystemSettings
+   - CardBoard
+   - ExportImportIvs
+   - DirectSdmcWrite
+   - SwitchCleanup
+   - SaveDataMove
+   - Shop
+   - Shell
+   - CategoryHomeMenu
+   - SeedDB
+  IoAccessControl:
+   - FsMountNand
+   - FsMountNandRoWrite
+   - FsMountTwln
+   - FsMountWnand
+   - FsMountCardSpi
+   - UseSdif3
+   - CreateSeed
+   - UseCardSpi
 
   # Process Settings
   MemoryType                    : Application # Application/System/Base
@@ -179,24 +219,50 @@ AccessControlInfo:
     KernelSetState: 124
     QueryProcessMemory: 125
 
-  # Service List -- same baseline set as Checkpoint's, minus the
-  # network/friends/news/ir/mic/y2r services it needs for its own
-  # purposes that this forwarder has no use for. APT:U/gsp/hid/fs are
-  # the ones a "normal libctru app" baseline actually exercises;
-  # source/main.c itself only ever touches the hb:ldr port, which
-  # (per the SystemCallAccess comment above) isn't gated here at all.
+  # Service List -- previously hand-trimmed down from Checkpoint's own
+  # list on the assumption that a forwarder only needs the services its
+  # own code directly calls. That reasoning already proved wrong once
+  # for FileSystemAccess (denied access silently rather than causing a
+  # boot failure) -- but the deeper symptom here (title launch never
+  # completes at all, no code ever runs, needs a hard reset, no crash
+  # dump) is consistent with something during APT/system bring-up
+  # itself hanging, before main() is ever reached, which the trimmed
+  # Dependency list below is a much likelier cause of than anything
+  # FileSystemAccess-related. Restored verbatim from Checkpoint's own
+  # working app.rsf rather than guessing again at a "minimal" subset --
+  # each wrong guess here costs a full install/launch/hard-reset cycle
+  # to find out.
   ServiceAccessControl:
    - APT:U
    - ac:u
-   - cfg:u
+   - am:net
+   - boss:U
+   - cam:u
+   - cecd:u
    - cfg:nor
+   - cfg:u
+   - csnd:SND
+   - dsp::DSP
+   - frd:u
    - fs:USER
    - gsp::Gpu
    - gsp::Lcd
    - hid:USER
+   - http:C
+   - ir:rst
+   - ir:u
+   - ir:USER
+   - mic:u
    - ndm:u
+   - news:s
+   - nwm::EXT
+   - nwm::UDS
    - ptm:sysm
    - ptm:u
+   - pxi:dev
+   - soc:U
+   - ssl:C
+   - y2r:u
 
 
 SystemControlInfo:
@@ -207,10 +273,32 @@ SystemControlInfo:
   # Modules that run services listed above should be included below
   Dependency:
     ac: 0x0004013000002402
+    am: 0x0004013000001502
+    boss: 0x0004013000003402
+    camera: 0x0004013000001602
+    cecd: 0x0004013000002602
     cfg: 0x0004013000001702
-    fs: 0x0004013000001102
+    codec: 0x0004013000001802
+    csnd: 0x0004013000002702
+    dlp: 0x0004013000002802
+    dsp: 0x0004013000001a02
+    friends: 0x0004013000003202
+    gpio: 0x0004013000001b02
     gsp: 0x0004013000001c02
     hid: 0x0004013000001d02
+    http: 0x0004013000002902
+    i2c: 0x0004013000001e02
+    ir: 0x0004013000003302
+    mcu: 0x0004013000001f02
+    mic: 0x0004013000002002
     ndm: 0x0004013000002b02
+    news: 0x0004013000003502
+    nim: 0x0004013000002c02
+    nwm: 0x0004013000002d02
     pdn: 0x0004013000002102
+    ps: 0x0004013000003102
     ptm: 0x0004013000002202
+    ro: 0x0004013000003702
+    socket: 0x0004013000002e02
+    spi: 0x0004013000002302
+    ssl: 0x0004013000002f02
