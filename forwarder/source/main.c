@@ -40,6 +40,22 @@
  * an incomplete ACI here doesn't fail cleanly, it hangs the whole
  * console during process bring-up (confirmed on hardware, needed a
  * hard reset, no crash dump since no exception ever fires).
+ *
+ * One more thing that isn't obvious from reading this file top to
+ * bottom: after a successful DoApplicationJump below, this process
+ * must NOT fall through to a normal voluntary exit. DoApplicationJump
+ * terminates the calling process itself, asynchronously, via Home
+ * Menu/PM -- letting our own code immediately return from main() (and
+ * run libctru's default aptExit()/srvExit() teardown) races that
+ * self-exit against the external termination the jump just triggered.
+ * That race doesn't fail every time -- it showed up as launches
+ * getting progressively worse on repeat (1st OK, 2nd crashed to Home
+ * Menu, 3rd froze the whole console), confirmed as forwarder-specific
+ * (fsv3ds itself relaunched cleanly 3x in a row via the physical
+ * Homebrew Launcher, which never goes through this jump at all).
+ * Fixed by looping on aptMainLoop() instead, which returns false once
+ * Home Menu/PM actually want this process closed -- let APT drive the
+ * termination instead of contending with it.
  */
 #include <3ds.h>
 #include <string.h>
@@ -113,8 +129,13 @@ main( void )
 	}
 
 	if (R_SUCCEEDED( target_rc ) && R_SUCCEEDED( argv_rc )) {
-		if (R_SUCCEEDED( APT_PrepareToDoApplicationJump( 0, HB_LAUNCHER_TITLE_ID, MEDIATYPE_SD ) ))
-			APT_DoApplicationJump( NULL, 0, NULL );
+		if (R_SUCCEEDED( APT_PrepareToDoApplicationJump( 0, HB_LAUNCHER_TITLE_ID, MEDIATYPE_SD ) )) {
+			if (R_SUCCEEDED( APT_DoApplicationJump( NULL, 0, NULL ) )) {
+				/* Let APT drive our termination -- see file header. */
+				while (aptMainLoop( ))
+					svcSleepThread( 50000000LL ); /* 50ms */
+			}
+		}
 	}
 
 	return 0;
