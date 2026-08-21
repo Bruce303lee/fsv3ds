@@ -1,7 +1,30 @@
 /* fsv3ds forwarder - a minimal native CIA whose entire job is to
- * chainload sdmc:/3ds/fsv3ds/fsv3ds.3dsx via Luma3DS's "hb:ldr" system,
- * then exit -- installed as its own title so it gets a Home Menu icon,
+ * chainload sdmc:/3ds/fsv3ds.3dsx via Luma3DS's "hb:ldr" system, then
+ * exit -- installed as its own title so it gets a Home Menu icon,
  * unlike a loose .3dsx which only the Homebrew Launcher can run.
+ *
+ * Target path is flat sdmc:/3ds/fsv3ds.3dsx, matching where every
+ * other homebrew .3dsx sits (and where Universal-Updater's generic
+ * .3dsx-extension install action actually places it) -- NOT
+ * sdmc:/3ds/fsv3ds/fsv3ds.3dsx, which was this project's own manual-
+ * FTP-deploy convention and doesn't match the wider ecosystem. Mixing
+ * the two up once already caused a real crash: Loader (Luma3DS's own
+ * system module, not this forwarder or fsv3ds) took an "undefined
+ * instruction" exception while handling a title-jump into the
+ * reserved Homebrew Launcher slot for a target path that didn't
+ * exist. A missing-file failure was already confirmed to fail
+ * *gracefully* (bounce to Home Menu, no dump) once earlier in this
+ * project -- this crash only appeared after the aptMainLoop-wait fix
+ * below changed the timing of this process's own exit, suggesting a
+ * genuine race/edge case in Loader itself when a title-jump target
+ * fails to load while the *calling* process is still winding down.
+ * Not fully root-caused inside Luma3DS's own code, and not going to
+ * be -- the fix here is simply to never hand Loader a path that isn't
+ * actually there (see the stat check in main()), which sidesteps the
+ * system-level edge case entirely regardless of its exact cause.
+ * fsv3ds's own settings.cfg still lives in sdmc:/3ds/fsv3ds/ as its
+ * private config directory (source/settings.c) -- unrelated, and
+ * unaffected by this.
  *
  * Ground-truthed against Luma3DS's own loader sysmodule source
  * (sysmodules/loader/source/hbldr.c/loader.c in github.com/LumaTeam/
@@ -58,10 +81,11 @@
  * termination instead of contending with it.
  */
 #include <3ds.h>
+#include <stdio.h>
 #include <string.h>
 
-#define TARGET_PATH "/3ds/fsv3ds/fsv3ds.3dsx"       /* no "sdmc:" prefix -- see hbldr_set_target() */
-#define TARGET_ARGV "sdmc:/3ds/fsv3ds/fsv3ds.3dsx"   /* argv[0] keeps it, matching a normal launch */
+#define TARGET_PATH "/3ds/fsv3ds.3dsx"       /* no "sdmc:" prefix -- see hbldr_set_target() */
+#define TARGET_ARGV "sdmc:/3ds/fsv3ds.3dsx"   /* argv[0] keeps it, matching a normal launch */
 
 /* The one reserved "Homebrew Launcher" title Luma3DS's loader
  * substitutes hb:ldr's stub for -- sd:/luma/config.ini's
@@ -121,6 +145,14 @@ main( void )
 {
 	Handle hbldr;
 	Result target_rc = -1, argv_rc = -1;
+	FILE *probe;
+
+	/* Never hand Loader a target that isn't there -- see file header
+	 * for the crash this avoids. */
+	probe = fopen( "sdmc:" TARGET_PATH, "rb" );
+	if (!probe)
+		return 0;
+	fclose( probe );
 
 	if (R_SUCCEEDED( svcConnectToPort( &hbldr, "hb:ldr" ) )) {
 		target_rc = hbldr_set_target( hbldr, TARGET_PATH );
